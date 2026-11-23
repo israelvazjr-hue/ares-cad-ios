@@ -152,6 +152,28 @@ try {
 .hdr, .topbar { gap: 4px !important; padding: 5px 6px !important; }
 .hdr .tbtn, .topbar .tbtn { padding: 4px 5px !important; font-size: 10px !important; min-width: 0 !important; }
 </style>
+
+<!-- ARES_IOS_SAFE_LAYOUT_V1 -->
+<style>
+  html, body {
+    padding-top: env(safe-area-inset-top, 44px) !important;
+    padding-bottom: env(safe-area-inset-bottom, 20px) !important;
+    box-sizing: border-box !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+    background: #0b1120 !important;
+  }
+  /* Move Sync pill cleanly to top-right below status bar so it never blocks Del */
+  #ares-sync-btn {
+    top: calc(env(safe-area-inset-top, 44px) + 46px) !important;
+    bottom: auto !important;
+    right: 10px !important;
+    padding: 5px 10px !important;
+    font-size: 11px !important;
+    opacity: 0.92;
+  }
+</style>
+
 </head>
 <body>
 <input type="file" id="stlFileIn" style="display:none" onchange="importSTLFile(this)">
