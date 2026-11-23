@@ -14,7 +14,7 @@ jobs:
           mkdir -p ios/App/App/Assets.xcassets/AppIcon.appiconset
           cp icon.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
       - run: |
-          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -sdk iphoneos -archivePath $PWD/build/App.xcarchive archive CODE_SIGNING_ALLOWED=NO
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -archivePath $PWD/build/App.xcarchive archive IPHONEOS_DEPLOYMENT_TARGET=15.0 SWIFT_ENABLE_EXPLICIT_MODULES=NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
           mkdir -p Payload
           cp -r build/App.xcarchive/Products/Applications/App.app Payload/
           zip -r ARES_CAD.ipa Payload
