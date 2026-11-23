@@ -1887,3 +1887,94 @@ document.getElementById('projList').addEventListener('click', async function(e) 
   }
 });
 </script>
+
+
+<!-- ARES_S24_SYNC_V1 -->
+<style>
+#ares-sync-btn {
+  position: fixed; bottom: 14px; right: 14px; z-index: 99999;
+  background: rgba(20, 26, 38, 0.92); color: #e2e8f0;
+  border: 1px solid rgba(56, 189, 248, 0.45); border-radius: 999px;
+  padding: 7px 13px; font: 600 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  display: flex; align-items: center; gap: 6px; backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35); cursor: pointer;
+}
+#ares-sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+</style>
+<button id="ares-sync-btn" title="Tap to Sync with S24+ (Long-press to set S24+ IP)">
+  <span id="ares-sync-dot"></span><span id="ares-sync-txt">Sync S24+</span>
+</button>
+<script>
+(function() {
+  const KEY_PROJ = 'ares_cad_projects_v1';
+  const KEY_AUTO = 'ares_cad_autosave_v1';
+  const KEY_HOST = 'ares_s24_host_v1';
+  const btn = document.getElementById('ares-sync-btn');
+  const dot = document.getElementById('ares-sync-dot');
+  const txt = document.getElementById('ares-sync-txt');
+
+  function getHost() {
+    return localStorage.getItem(KEY_HOST) || 'http://192.168.10.116:8002';
+  }
+  function setStatus(color, label) {
+    dot.style.background = color;
+    txt.textContent = label;
+  }
+  async function syncNow(manual) {
+    const host = getHost().replace(/\/$/, '');
+    if (manual) setStatus('#38bdf8', 'Syncing...');
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch(host + '/api/cad/projects', { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const remoteData = await res.json();
+      const remoteList = Array.isArray(remoteData) ? remoteData : (remoteData.projects || []);
+      let localList = [];
+      try { localList = JSON.parse(localStorage.getItem(KEY_PROJ) || '[]'); } catch(e) {}
+      if (!Array.isArray(localList)) localList = [];
+
+      const mergedMap = new Map();
+      [...remoteList, ...localList].forEach(p => {
+        if (!p) return;
+        const id = p.id || p.name || JSON.stringify(p).slice(0, 40);
+        const prev = mergedMap.get(id);
+        if (!prev || (p.updatedAt || p.timestamp || 0) >= (prev.updatedAt || prev.timestamp || 0)) {
+          mergedMap.set(id, p);
+        }
+      });
+      const merged = Array.from(mergedMap.values());
+      localStorage.setItem(KEY_PROJ, JSON.stringify(merged));
+
+      await fetch(host + '/api/cad/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projects: merged, autosave: localStorage.getItem(KEY_AUTO) })
+      }).catch(() => {});
+
+      setStatus('#22c55e', 'Synced (' + merged.length + ')');
+      if (manual) setTimeout(() => setStatus('#22c55e', 'S24+ Ready'), 2500);
+    } catch (e) {
+      setStatus('#94a3b8', 'Offline Mode');
+    }
+  }
+
+  let pressTimer;
+  btn.addEventListener('touchstart', () => {
+    pressTimer = setTimeout(() => {
+      const next = prompt('S24+ Server URL (Wi-Fi or Tailscale):', getHost());
+      if (next && next.trim()) {
+        localStorage.setItem(KEY_HOST, next.trim());
+        syncNow(true);
+      }
+    }, 700);
+  }, { passive: true });
+  btn.addEventListener('touchend', () => clearTimeout(pressTimer));
+  btn.addEventListener('click', () => syncNow(true));
+
+  window.addEventListener('online', () => syncNow(false));
+  setTimeout(() => syncNow(false), 1500);
+  setInterval(() => syncNow(false), 45000);
+})();
+</script>
