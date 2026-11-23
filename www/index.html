@@ -42,7 +42,7 @@
 <link rel="icon" type="image/png" href="/cad_triad_512.png">
 <link rel="apple-touch-icon" href="/cad_triad_512.png">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>ARES CAD // ONSHAPE WORKSTATION</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -153,26 +153,7 @@ try {
 .hdr .tbtn, .topbar .tbtn { padding: 4px 5px !important; font-size: 10px !important; min-width: 0 !important; }
 </style>
 
-<!-- ARES_IOS_SAFE_LAYOUT_V1 -->
-<style>
-  html, body {
-    padding-top: env(safe-area-inset-top, 44px) !important;
-    padding-bottom: env(safe-area-inset-bottom, 20px) !important;
-    box-sizing: border-box !important;
-    height: 100dvh !important;
-    overflow: hidden !important;
-    background: #0b1120 !important;
-  }
-  /* Move Sync pill cleanly to top-right below status bar so it never blocks Del */
-  #ares-sync-btn {
-    top: calc(env(safe-area-inset-top, 44px) + 46px) !important;
-    bottom: auto !important;
-    right: 10px !important;
-    padding: 5px 10px !important;
-    font-size: 11px !important;
-    opacity: 0.92;
-  }
-</style>
+
 
 </head>
 <body>
@@ -1914,30 +1895,54 @@ document.getElementById('projList').addEventListener('click', async function(e) 
 
 
 
-<!-- ARES_S24_SYNC_V1 -->
+
+
+
+<!-- ARES_IOS_POLISH_V2 -->
 <style>
-#ares-sync-btn {
-  position: fixed;
-  top: calc(env(safe-area-inset-top, 44px) + 46px);
-  right: 10px; z-index: 99999;
-  background: rgba(20, 26, 38, 0.92); color: #e2e8f0;
-  border: 1px solid rgba(56, 189, 248, 0.45); border-radius: 999px;
-  padding: 5px 10px; font: 600 11px -apple-system, BlinkMacSystemFont, sans-serif;
-  display: flex; align-items: center; gap: 6px; backdrop-filter: blur(8px);
-  box-shadow: 0 4px 14px rgba(0,0,0,0.35); cursor: pointer;
-}
-#ares-sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+    background: #090c12 !important;
+  }
+  header {
+    padding-top: calc(max(env(safe-area-inset-top, 44px), 44px) + 6px) !important;
+    padding-bottom: 8px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+  .workspace {
+    padding-bottom: max(env(safe-area-inset-bottom, 16px), 16px) !important;
+  }
+  #ares-sync-btn {
+    position: fixed;
+    top: calc(max(env(safe-area-inset-top, 44px), 44px) + 88px);
+    left: 10px;
+    z-index: 20;
+    background: rgba(13, 18, 28, 0.88); color: #e2e8f0;
+    border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 999px;
+    padding: 4px 9px; font: 600 10px -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex; align-items: center; gap: 5px; backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35); cursor: pointer;
+  }
+  #ares-sync-dot { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
 </style>
 <button id="ares-sync-btn" title="Tap to Sync with S24+ (Long-press to set S24+ IP)">
-  <span id="ares-sync-dot"></span><span id="ares-sync-txt">Sync S24+</span>
+  <span id="ares-sync-dot"></span><span id="ares-sync-txt">Offline</span>
 </button>
 <script>
 (function() {
-  const KEY_PROJ = 'ares_cad_projects_v1';
+  const DB_KEY = 'ARES_CAD_IOS_PROJECTS';
+  const DEL_KEY = 'ARES_CAD_IOS_DELETED';
   const KEY_HOST = 'ares_s24_host_v1';
   const btn = document.getElementById('ares-sync-btn');
   const dot = document.getElementById('ares-sync-dot');
   const txt = document.getElementById('ares-sync-txt');
+
+  // Clear stale array keys from earlier tests
+  localStorage.removeItem('ares_cad_projects_v1');
 
   function getHost() {
     return localStorage.getItem(KEY_HOST) || 'http://192.168.10.116:8002';
@@ -1946,61 +1951,92 @@ document.getElementById('projList').addEventListener('click', async function(e) 
     dot.style.background = color;
     txt.textContent = label;
   }
+
+  // Track local deletions on iPhone so they also delete on S24+ when online
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = async function(url, opts) {
+    const u = String(url);
+    if (u.startsWith('/api/cad/projects/delete')) {
+      try {
+        const body = JSON.parse((opts && opts.body) || '{}');
+        if (body.name) {
+          const del = JSON.parse(localStorage.getItem(DEL_KEY) || '[]');
+          if (!del.includes(body.name)) del.push(body.name);
+          localStorage.setItem(DEL_KEY, JSON.stringify(del));
+          const host = getHost().replace(/\/$/, '');
+          _origFetch(host + '/api/cad/projects/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: body.name })
+          }).catch(() => {});
+        }
+      } catch(e) {}
+    }
+    return _origFetch(url, opts);
+  };
+
   async function syncNow(manual) {
     const host = getHost().replace(/\/$/, '');
     if (manual) setStatus('#38bdf8', 'Syncing...');
     try {
+      // 1. Push any queued iPhone deletions to S24+
+      const delList = JSON.parse(localStorage.getItem(DEL_KEY) || '[]');
+      for (const name of delList) {
+        await _origFetch(host + '/api/cad/projects/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+      }
+      if (delList.length) localStorage.setItem(DEL_KEY, '[]');
+
+      // 2. Fetch authoritative list from S24+
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 3000);
-      const res = await fetch(host + '/api/cad/projects', { signal: ctrl.signal, cache: 'no-store' });
+      const res = await _origFetch(host + '/api/cad/projects', { signal: ctrl.signal, cache: 'no-store' });
       clearTimeout(t);
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const remoteList = await res.json();
 
       let localStore = {};
-      try {
-        const parsed = JSON.parse(localStorage.getItem(KEY_PROJ) || '{}');
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) localStore = parsed;
-      } catch(e) {}
+      try { localStore = JSON.parse(localStorage.getItem(DB_KEY) || '{}'); } catch(e) {}
 
-      // Push any brand-new local-only iPhone projects up to S24+ first
+      // 3. Upload any brand-new local iPhone projects not yet on S24+
       const remoteNames = new Set((Array.isArray(remoteList) ? remoteList : []).map(r => r.name));
       const toUpload = [];
       Object.entries(localStore).forEach(([name, entry]) => {
-        if (!remoteNames.has(name) && entry && entry.data) {
+        if (!remoteNames.has(name) && entry && Array.isArray(entry.data) && entry.data.length > 0) {
           toUpload.push({ name, ts: entry.ts || Date.now(), data: entry.data });
         }
       });
       if (toUpload.length > 0) {
-        await fetch(host + '/api/cad/projects', {
+        await _origFetch(host + '/api/cad/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projects: toUpload })
         }).catch(() => {});
       }
 
-      // Mirror S24+ authoritative list into iPhone localStorage dictionary format
+      // 4. Mirror S24+ projects directly into ARES_CAD_IOS_PROJECTS
       const nextStore = {};
       (Array.isArray(remoteList) ? remoteList : []).forEach(r => {
         if (!r || !r.name) return;
         nextStore[r.name] = {
           ts: r.ts || Date.now(),
-          kb: r.kb || 1,
           data: r.data || (localStore[r.name] && localStore[r.name].data) || []
         };
       });
       toUpload.forEach(u => {
-        nextStore[u.name] = { ts: u.ts, kb: Math.max(1, Math.round(JSON.stringify(u.data).length / 1024)), data: u.data };
+        nextStore[u.name] = { ts: u.ts, data: u.data };
       });
 
-      localStorage.setItem(KEY_PROJ, JSON.stringify(nextStore));
+      localStorage.setItem(DB_KEY, JSON.stringify(nextStore));
       if (typeof window.renderProjectsList === 'function') window.renderProjectsList();
 
       const count = Object.keys(nextStore).length;
       setStatus('#22c55e', 'Synced (' + count + ')');
-      if (manual) setTimeout(() => setStatus('#22c55e', 'S24+ Ready'), 2500);
     } catch (e) {
-      setStatus('#94a3b8', 'Offline Mode');
+      setStatus('#94a3b8', 'Offline');
     }
   }
 
@@ -2018,7 +2054,7 @@ document.getElementById('projList').addEventListener('click', async function(e) 
   btn.addEventListener('click', () => syncNow(true));
 
   window.addEventListener('online', () => syncNow(false));
-  setTimeout(() => syncNow(false), 1200);
-  setInterval(() => syncNow(false), 30000);
+  setTimeout(() => syncNow(false), 1000);
+  setInterval(() => syncNow(false), 20000);
 })();
 </script>
