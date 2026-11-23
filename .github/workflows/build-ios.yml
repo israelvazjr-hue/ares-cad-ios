@@ -12,7 +12,23 @@ jobs:
       - run: npx cap add ios
       - run: |
           mkdir -p ios/App/App/Assets.xcassets/AppIcon.appiconset
-          cp icon.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          sips -z 1024 1024 icon.png --out ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          cat << 'JSON' > ios/App/App/Assets.xcassets/AppIcon.appiconset/Contents.json
+          {
+            "images": [
+              {
+                "filename": "AppIcon-512@2x.png",
+                "idiom": "universal",
+                "platform": "ios",
+                "size": "1024x1024"
+              }
+            ],
+            "info": {
+              "author": "xcode",
+              "version": 1
+            }
+          }
+          JSON
       - run: |
           xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -archivePath $PWD/build/App.xcarchive archive IPHONEOS_DEPLOYMENT_TARGET=15.0 SWIFT_ENABLE_EXPLICIT_MODULES=NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
           mkdir -p Payload
