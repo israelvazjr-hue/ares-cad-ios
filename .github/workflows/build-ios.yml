@@ -1,0 +1,24 @@
+name: Build ARES CAD iOS IPA
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npx cap add ios
+      - run: |
+          mkdir -p ios/App/App/Assets.xcassets/AppIcon.appiconset
+          cp icon.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+      - run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -sdk iphoneos -archivePath $PWD/build/App.xcarchive archive CODE_SIGNING_ALLOWED=NO
+          mkdir -p Payload
+          cp -r build/App.xcarchive/Products/Applications/App.app Payload/
+          zip -r ARES_CAD.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ARES_CAD-ipa
+          path: ARES_CAD.ipa

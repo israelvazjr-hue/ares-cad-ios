@@ -1,0 +1,1889 @@
+<!doctype html>
+<html lang="en">
+<head>
+<script>
+(function(){
+  const _origFetch = window.fetch.bind(window);
+  const DB_KEY = 'ARES_CAD_IOS_PROJECTS';
+  function getStore(){ try { return JSON.parse(localStorage.getItem(DB_KEY) || '{}'); } catch(e){ return {}; } }
+  function setStore(obj){ localStorage.setItem(DB_KEY, JSON.stringify(obj)); }
+  window.fetch = async function(url, opts){
+    const u = String(url);
+    if (u.startsWith('/api/cad/projects')) {
+      const store = getStore();
+      if (u.includes('/save')) {
+        const body = JSON.parse((opts && opts.body) || '{}');
+        store[body.name] = { ts: Date.now(), data: body.data };
+        setStore(store);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (u.includes('/load')) {
+        const name = decodeURIComponent(u.split('name=')[1] || '');
+        return new Response(JSON.stringify((store[name] && store[name].data) || []), { status: 200 });
+      }
+      if (u.includes('/delete')) {
+        const body = JSON.parse((opts && opts.body) || '{}');
+        delete store[body.name];
+        setStore(store);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      const list = Object.keys(store).map(k => ({
+        name: k,
+        ts: store[k].ts || Date.now(),
+        kb: Math.max(1, Math.round(JSON.stringify(store[k].data || []).length / 1024))
+      }));
+      return new Response(JSON.stringify(list), { status: 200 });
+    }
+    return _origFetch(url, opts);
+  };
+})();
+</script>
+<link rel="manifest" href="/manifest_cad.json">
+<link rel="icon" type="image/png" href="/cad_triad_512.png">
+<link rel="apple-touch-icon" href="/cad_triad_512.png">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ARES CAD // ONSHAPE WORKSTATION</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #090c12; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; overflow: hidden; display: flex; flex-direction: column; height: 100dvh; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; background: rgba(17,24,39,0.96); border-bottom: 1px solid #1e293b; z-index: 25; flex-shrink: 0; backdrop-filter: blur(10px); }
+  .brand { font-weight: 800; font-size: 13px; letter-spacing: 0.5px; color: #38bdf8; display: flex; align-items: center; gap: 6px; }
+  .top-btns { display: flex; gap: 3px; align-items: center; flex-wrap: nowrap; } .top-btns button { padding: 5px 6px; font-size: 10px; }
+  button { background: #1a2436; color: #e2e8f0; border: 1px solid #2d3b52; border-radius: 7px; padding: 6px 8px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.12s ease; }
+  button:active { transform: scale(0.95); background: #334155; }
+  button.blue { background: linear-gradient(135deg, #2563eb, #1d4ed8); border-color: #3b82f6; color: #fff; box-shadow: 0 2px 8px rgba(37,99,235,0.35); }
+  button.green { background: linear-gradient(135deg, #10b981, #059669); border-color: #34d399; color: #022c22; font-weight: 800; box-shadow: 0 2px 8px rgba(16,185,129,0.35); }
+  button.sim-on { background: linear-gradient(135deg, #f59e0b, #d97706); border-color: #fbbf24; color: #1c1917; font-weight: 800; }
+  button.hole-on { background: rgba(148,163,184,0.28); border-color: #cbd5e1; color: #fff; }
+  button.danger { background: rgba(239,68,68,0.16); border-color: #991b1b; color: #fca5a5; }
+  .workspace { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #viewport { flex: 1; position: relative; min-height: 32%; overflow: hidden; z-index: 1; touch-action: none; } #viewport canvas { display: block; width: 100% !important; height: 100% !important; touch-action: none; background: radial-gradient(circle at 50% 35%, #172033 0%, #080b10 100%); }
+  .hud-top { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; justify-content: space-between; pointer-events: none; gap: 6px; }
+  .pill { background: rgba(13,18,28,0.88); border: 1px solid #2b3648; border-radius: 7px; padding: 4px 7px; font-size: 10px; line-height: 1.2; white-space: nowrap; color: #e2e8f0; pointer-events: auto; backdrop-filter: blur(6px); }
+  .view-cube { pointer-events: auto; display: flex; gap: 3px; background: rgba(15,23,42,0.88); padding: 3px; border-radius: 8px; border: 1px solid #334155; backdrop-filter: blur(8px); }
+  .view-cube button { padding: 4px 7px; font-size: 10px; border-radius: 6px; }
+  .tree { position: absolute; bottom: 8px; left: 8px; max-height: 115px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; z-index: 5; }
+  .tree-item { background: rgba(15,23,42,0.88); border: 1px solid #334155; padding: 4px 9px; border-radius: 6px; font-size: 10px; text-align: left; backdrop-filter: blur(6px); }
+  .tree-item.sel { border-color: #38bdf8; background: rgba(14,165,233,0.28); color: #fff; }
+  .dock { position: relative; z-index: 25; background: rgba(13,18,28,0.98); border-top: 1px solid #263245; display: flex; flex-direction: column; max-height: 56%; flex-shrink: 0; box-shadow: 0 -12px 32px rgba(0,0,0,0.8); }
+  .tabs { display: grid; grid-template-columns: repeat(5, 1fr); background: #090d14; border-bottom: 1px solid #1e293b; position: relative; z-index: 30; flex-shrink: 0; }
+  .tab { border: 0; border-radius: 0; background: transparent; color: #64748b; padding: 10px 2px; font-size: 11px; font-weight: 700; border-bottom: 2px solid transparent; touch-action: manipulation; }
+  .tab.active { color: #38bdf8; border-bottom-color: #38bdf8; background: #111827; }
+  .panel { padding: 8px 8px 28px; overflow-y: auto; display: none; flex-direction: column; gap: 6px; }
+  .panel.active { display: flex; }
+  .grid4 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .card { background: #131b2b; border: 1px solid #263349; border-radius: 8px; padding: 6px 8px; }
+  .card-lbl { font-size: 10px; color: #94a3b8; display: flex; justify-content: space-between; margin-bottom: 3px; }
+  .step-row { display: flex; gap: 4px; align-items: center; }
+  .step-row input { width: 100%; background: #090d14; border: 1px solid #334155; color: #fff; border-radius: 6px; padding: 4px 5px; font-size: 12px; font-family: monospace; text-align: center; min-width: 0; }
+  .step-row button { padding: 4px 8px; font-size: 12px; flex-shrink: 0; }
+  .pin { position: absolute; transform: translate(-50%, -50%); background: rgba(9,13,20,0.92); border: 1px solid #00ff87; border-radius: 5px; padding: 1px 4px; display: none; align-items: center; z-index: 16; font-size: 10px; font-family: monospace; color: #00ff87; box-shadow: 0 3px 10px rgba(0,0,0,0.6); }
+  .pin input { width: 36px; background: transparent; border: 0; color: #fff; text-align: center; font-size: 11px; font-weight: 700; padding: 1px 0; outline: none; }
+  #selRect { position: absolute; border: 1.5px dashed #38bdf8; background: rgba(56,189,248,0.16); pointer-events: none; display: none; z-index: 18; border-radius: 4px; }
+  .swatches { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 2px 4px; }
+  .swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #475569; cursor: pointer; }
+  @media (orientation: landscape) { .workspace { flex-direction: row; } .dock { width: 365px; max-height: 100%; border-top: 0; border-left: 1px solid #1e293b; } }
+#pinW::before { content: "W: "; opacity: 0.85; }
+#pinL::before { content: "L: "; opacity: 0.85; }
+#pinH::before { content: "H: "; opacity: 0.85; }
+</style>
+<script>if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js");
+const _origClamp = clampAboveBed;
+clampAboveBed = function(m) {
+  if (!m) return;
+  m.updateMatrixWorld(true);
+  const minY = new THREE.Box3().setFromObject(m).min.y;
+  if (!m.userData.lifted || autoBedHug) { m.position.y -= minY; }
+  else if (minY < 0) { m.position.y -= minY; m.userData.lifted = false; }
+};
+const _origStepMove = window.stepMove;
+window.stepMove = (axis, dir) => { if (selected && axis === 'y' && dir > 0 && !autoBedHug) selected.userData.lifted = true; _origStepMove(axis, dir); };
+const _origDrop = window.dropToBed;
+window.dropToBed = () => { if (selected) selected.userData.lifted = false; _origDrop(); };
+
+window._aresSerialize = () => parts.map(m => {
+  m.updateMatrixWorld(true);
+  const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+  g.applyMatrix4(m.matrixWorld);
+  return {
+    name: m.userData?.name || 'PART',
+    type: m.userData?.type || 'box',
+    params: m.userData?.params || {},
+    isHole: !!m.userData?.isHole,
+    lifted: !!m.userData?.lifted,
+    color: m.material?.color ? m.material.color.getHex() : 0x3b82f6,
+    pos: Array.from(g.attributes.position.array)
+  };
+});
+window._aresRestore = (data) => {
+  if (!Array.isArray(data)) return;
+  parts.forEach(m => scene.remove(m));
+  parts.length = 0; selected = null; prevSelected = null;
+  data.forEach(item => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(item.pos, 3));
+    const mat = item.isHole ? new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.42 }) : makeCadMat(item.color);
+    const m = new THREE.Mesh(geo, mat);
+    styleMesh(m);
+    m.userData = { name: item.name, type: item.type, params: item.params || {}, isHole: !!item.isHole, lifted: !!item.lifted };
+    scene.add(m); parts.push(m);
+  });
+  if (parts.length) selectMesh(parts.at(-1));
+  syncUI();
+};
+setInterval(() => { try { localStorage.setItem('ares_cad_autosave_v1', JSON.stringify(window._aresSerialize())); } catch (e) {} }, 2500);
+try {
+  const savedAuto = JSON.parse(localStorage.getItem('ares_cad_autosave_v1') || 'null');
+  if (savedAuto && savedAuto.length) window._aresRestore(savedAuto);
+} catch (e) {}
+</script><style>
+#dimX { border-color: #ef4444 !important; color: #fca5a5 !important; }
+#dimZ { border-color: #00ff87 !important; color: #86efac !important; }
+#dimY { border-color: #3b82f6 !important; color: #93c5fd !important; }
+</style>
+<style>
+#pinW { border-color: #ef4444 !important; color: #fca5a5 !important; }
+#pinL { border-color: #00ff87 !important; color: #86efac !important; }
+#pinH { border-color: #3b82f6 !important; color: #93c5fd !important; }
+</style>
+<style>
+.hdr, .topbar { gap: 4px !important; padding: 5px 6px !important; }
+.hdr .tbtn, .topbar .tbtn { padding: 4px 5px !important; font-size: 10px !important; min-width: 0 !important; }
+</style>
+</head>
+<body>
+<input type="file" id="stlFileIn" style="display:none" onchange="importSTLFile(this)">
+<div id="impModal" style="display:none;position:fixed;inset:0;background:rgba(5,8,15,0.85);z-index:99;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);">
+  <div style="background:#111827;border:1px solid #334155;border-radius:12px;padding:14px;max-width:320px;width:100%;max-height:80dvh;display:flex;flex-direction:column;gap:8px;">
+    <div style="font-weight:800;font-size:14px;color:#38bdf8;">📂 Import 3D Model (.STL)</div>
+    <button class="blue" style="padding:9px;font-size:12px;" onclick="document.getElementById('impModal').style.display='none';document.getElementById('stlFileIn').click()">📱 Pick from Phone Storage / Files</button>
+    <div style="font-size:10px;color:#94a3b8;">Or tap a model from Download / Uploads:</div>
+    <div id="serverStlList" style="overflow-y:auto;display:flex;flex-direction:column;gap:5px;max-height:220px;"></div>
+    <button class="danger" onclick="document.getElementById('impModal').style.display='none'">Cancel</button>
+  </div>
+</div>
+<div id="expModal" style="display:none;position:fixed;inset:0;background:rgba(5,8,15,0.82);z-index:99;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);">
+  <div style="background:#111827;border:1px solid #334155;border-radius:12px;padding:16px;max-width:300px;width:100%;display:flex;flex-direction:column;gap:10px;">
+    <div style="font-weight:800;font-size:14px;color:#38bdf8;">💾 Export 3D Model (.STL)</div>
+    <div style="font-size:11px;color:#94a3b8;">Choose where to save or send your watertight STL mesh:</div>
+    <button class="blue" style="padding:10px;font-size:12px;" onclick="document.getElementById('expModal').style.display='none';exportSTL(false)">📥 Save STL to Phone Downloads</button>
+    <button class="green" style="padding:10px;font-size:12px;" onclick="document.getElementById('expModal').style.display='none';exportSTL(true)">⚡ Send STL to SV07 Plus Slicer</button>
+    <button onclick="document.getElementById('expModal').style.display='none';location.href='/'">🖨️ Open Printer Dashboard</button>
+    <button class="danger" onclick="document.getElementById('expModal').style.display='none'">Cancel</button>
+  </div>
+</div>
+<header>
+  <div class="brand">📐 ARES CAD </div>
+  <div class="top-btns">
+    <button class="tbtn" id="topProjBtn" onclick="window.openProjectsModal()" style="border-color:#38bdf8;color:#38bdf8;font-size:13px;padding:4px 6px;" title="Saved Projects">📁</button>
+    <button id="boxSelBtn" onclick="toggleBoxSelect()">⬚ Select</button>
+    <button id="moveShapeBtn" onclick="toggleMoveLock()" style="padding:7px 11px;font-size:11px;">✥ Move</button>
+    <button onclick="undoAction()">↩️</button>
+    <button onclick="duplicateSelected()">📋 Dup</button>
+    <button onclick="dropToBed()">⬇️ Bed</button>
+    <button onclick="openImportModal()">📂 Import Model</button>
+    <button class="green" onclick="document.getElementById('expModal').style.display='flex'">💾 Export Model</button>
+  </div>
+</header>
+<div class="workspace">
+  <div id="viewport">
+    <div class="hud-top">
+      <div id="hudDim" style="display:none;"></div>
+      <div class="view-cube" style="pointer-events:auto;">
+        <button id="mBtnMove" onclick="setGizmoMode('move')" style="color:#00ff87;">✥ Move</button>
+        <button id="mBtnSize" onclick="setGizmoMode('size')">📐 Size</button>
+        <button id="mBtnRot" onclick="setGizmoMode('rotate')">🔄 Rot</button>
+      </div>
+      <div style="display:flex;gap:4px;pointer-events:auto;"><button class="pill" id="quickStepBtn" onclick="cycleStep()" style="cursor:pointer;color:#00ff87;border-color:#00ff87;padding:5px 8px;font-size:11px;">1mm</button><button class="pill" id="autoBedBtn" onclick="toggleAutoBed()" style="cursor:pointer;color:#94a3b8;border-color:#2b3648;padding:5px 7px;font-size:11px;" title="Auto-keep grounded shapes on bed when rotating/resizing">🧲</button></div>
+      <div class="view-cube">
+        <button onclick="setCam('iso')">Iso</button>
+        <button onclick="setCam('top')">Top</button>
+        <button onclick="setCam('front')">Front</button>
+        <button onclick="setCam('right')">Right</button>
+      </div>
+    </div>
+        <div id="selRect"></div>
+    <div class="tree" id="partTree"></div>
+    <div class="pin" id="pinW"><input id="fW" type="number" step="any" oninput="setDim('x',this.value)" onblur="setDim('x',this.value)"></div>
+    <div class="pin" id="pinL"><input id="fL" type="number" step="any" oninput="setDim('y',this.value)" onblur="setDim('y',this.value)"></div>
+    <div class="pin" id="pinH"><input id="fH" type="number" step="any" oninput="setDim('z',this.value)" onblur="setDim('z',this.value)"></div>
+    <div class="pin" id="pinR" style="border-color:#3b82f6;color:#93c5fd;"><b id="rAxisLbl">Z</b>:<input id="fRot" type="number" step="any" style="width:38px" oninput="setExactRot(this.value)" onblur="setExactRot(this.value)">°</div>
+  </div>
+  <div class="dock">
+    <div class="tabs">
+      <button class="tab active" onclick="openTab('pCreate', this)">Create</button>
+      <button class="tab" onclick="openTab('pDim', this)">Size / Gear</button>
+      <button class="tab" onclick="openTab('pXform', this)">Move / Rot</button>
+      <button class="tab" onclick="openTab('pSim', this)">Tools</button>
+      <button class="tab" onclick="openTab('pPhys', this)">⚙️ Physics</button>
+    </div>
+    <div id="pCreate" class="panel active">
+      <div class="grid4">
+        <button onclick="addShape('box')">Box</button>
+        <button onclick="addShape('cyl')">Cylinder</button>
+        <button onclick="addShape('sphere')">Sphere</button>
+        <button onclick="addShape('tube')">Tube</button>
+        <button onclick="addShape('cone')">Cone</button>
+        <button onclick="addShape('torus')">Torus</button>
+        <button onclick="addShape('gear')">⚙️ Gear</button>
+        <button onclick="addShape('hex')">⬡ Hex Nut</button>
+        <button onclick="addShape('dshaft')">D-Shaft</button>
+        <button onclick="addShape('helix')">🌀 Spring</button>
+        <button onclick="addShape('wedge')">Wedge</button>
+        <button onclick="addShape('boss')">M3 Boss</button>
+        <button onclick="addShape('hemi')">🌗 Hemi</button>
+        <button onclick="addShape('poly')">⬡ Prism</button>
+        <button onclick="addShape('pyramid')">🔺 Pyramid</button>
+        <button onclick="addShape('washer')">💍 Washer</button>
+        <button onclick="addShape('bearing')">🔘 Bearing</button>
+        <button onclick="addShape('bolt')">🔩 Bolt</button>
+        <button onclick="addShape('motor')">🔌 Motor</button>
+        <button onclick="addShape('slot')">🔩 Slot Bar</button>
+        <button onclick="addShape('b18650')">🔋 18650</button>
+        <button onclick="addShape('b21700')">🔋 21700</button>
+        <button onclick="addShape('baa')">🔋 AA</button>
+        <button onclick="addShape('baaa')">🔋 AAA</button>
+        <button onclick="addShape('b9v')">🔋 9V</button>
+      </div>
+      <div class="grid4">
+        <button id="btnHole" onclick="toggleHole()">🕳️ Hole</button>
+        <button class="blue" onclick="groupSelected()">🔗 Group</button>
+        <button onclick="ungroupSelected()">🔓 Ungroup</button>
+        <button class="danger" onclick="deleteSelected()">🗑️ Del</button>
+      </div>
+    </div>
+    <div id="pDim" class="panel">
+      <div class="grid2">
+        <div class="card"><div class="card-lbl"><span>Width (X)</span><span class="uTag">mm</span></div><div class="step-row"><button onclick="nudgeDim('x',-1)">-</button><input id="inX" type="number" step="any" oninput="setDim('x',this.value)" onblur="setDim('x',this.value)"><button onclick="nudgeDim('x',1)">+</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Length (Y)</span><span class="uTag">mm</span></div><div class="step-row"><button onclick="nudgeDim('y',-1)">-</button><input id="inY" type="number" step="any" oninput="setDim('y',this.value)" onblur="setDim('y',this.value)"><button onclick="nudgeDim('y',1)">+</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Height (Z)</span><span class="uTag">mm</span></div><div class="step-row"><button onclick="nudgeDim('z',-1)">-</button><input id="inZ" type="number" step="any" oninput="setDim('z',this.value)" onblur="setDim('z',this.value)"><button onclick="nudgeDim('z',1)">+</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Outer Diameter</span><span class="uTag">mm</span></div><div class="step-row"><button onclick="nudgeDim('rad',-0.5)">-</button><input id="inRad" type="number" step="any" oninput="setDim('rad',this.value)" onblur="setDim('rad',this.value)"><button onclick="nudgeDim('rad',0.5)">+</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Inner Hole Dia</span><span class="uTag">mm</span></div><div class="step-row"><button onclick="nudgeDim('holeR',-0.5)">-</button><input id="inHoleR" type="number" step="any" oninput="setDim('holeR',this.value)" onblur="setDim('holeR',this.value)"><button onclick="nudgeDim('holeR',0.5)">+</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Teeth / Sides / Coils</span></div><div class="step-row"><button onclick="nudgeDim('teeth',-1)">-</button><input id="inTeeth" type="number" step="1" oninput="setDim('teeth',this.value)" onblur="setDim('teeth',this.value)"><button onclick="nudgeDim('teeth',1)">+</button></div></div>
+      </div>
+    </div>
+    <div id="pXform" class="panel">
+      <div class="grid2">
+        <div class="card"><div class="card-lbl"><span>Move Step (<span class="uTag">mm</span>)</span></div><div class="step-row"><input id="moveStep" type="number" step="any" value="1" oninput="document.getElementById('quickStepBtn').textContent=(this.value||1)+'mm'"></div></div>
+        <div class="card"><div class="card-lbl"><span>Rotate Step (°)</span></div><div class="step-row"><input id="rotStep" type="number" step="any" value="5"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><div class="card-lbl"><span>Move X</span><b id="posX">0</b></div><div class="step-row"><button onclick="stepMove('x',-1)">-X</button><button onclick="stepMove('x',1)">+X</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Move Y</span><b id="posY">0</b></div><div class="step-row"><button onclick="stepMove('z',-1)">-Y</button><button onclick="stepMove('z',1)">+Y</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Elevate Z</span><b id="posZ">0</b></div><div class="step-row"><button onclick="stepMove('y',-1)">-Z</button><button onclick="stepMove('y',1)">+Z</button><button onclick="dropToBed()">⬇️</button></div></div>
+        <div class="card"><div class="card-lbl"><span>Rotate <b id="rotReadout" style="color:#38bdf8;">0° / 0° / 0°</b></span><span>X / Y / Z</span></div><div class="step-row"><button onclick="stepRot('x',-1)">-X</button><button onclick="stepRot('x',1)">+X</button><button onclick="stepRot('z',-1)">-Y</button><button onclick="stepRot('z',1)">+Y</button><button onclick="stepRot('y',-1)">-Z</button><button onclick="stepRot('y',1)">+Z</button></div></div>
+      </div>
+    </div>
+    <div id="pSim" class="panel">
+      <div class="grid4">
+        <button class="blue" onclick="bridgeParts()">🌉 Bridge</button>
+        <button id="physBtn" onclick="togglePhysics()">🌍 Physics</button>
+        <button onclick="setMotorGear()">⚡ Motor</button>
+        <button onclick="linkGears()">🔗 Link</button>
+        <button onclick="resetSimState()">🔄 Reset</button>
+        <button id="simBtn" onclick="toggleSim()">️ Sim Gears</button>
+        <button onclick="hollowSelected()">📦 Shell</button>
+        <button onclick="throughHollowSelected()">🕳️ Through</button>
+        <button onclick="planeCutSelected()">🔪 Cut Half</button>
+        <button onclick="duplicateSelected()">📋 Clone</button>
+        <button onclick="duplicateSelected()">📋 Dup</button>
+        <button onclick="mirrorSelected()">🪞 Mirror</button>
+        <button onclick="flip180()">🙃 Flip 180°</button>
+        <button onclick="alignSelected()">🧲 Align</button>
+        <button onclick="arrayLinear()">📏 Array×3</button>
+        <button onclick="arrayRadial()">🎡 Radial×6</button>
+        <button onclick="centerSelected()">🎯 Center</button>
+        <button onclick="toggleWireframe()">🕸️ X-Ray</button>
+        <button onclick="toggleHide()">👁️ Hide</button>
+        <button class="danger" onclick="clearScene()">💥 Clear</button>
+      </div>
+      <div class="swatches">
+        <span style="font-size:10px;color:#94a3b8;">Filament:</span>
+        <div class="swatch" style="background:#3b82f6" onclick="paintPart(0x3b82f6)"></div>
+        <div class="swatch" style="background:#10b981" onclick="paintPart(0x10b981)"></div>
+        <div class="swatch" style="background:#f59e0b" onclick="paintPart(0xf59e0b)"></div>
+        <div class="swatch" style="background:#ef4444" onclick="paintPart(0xef4444)"></div>
+        <div class="swatch" style="background:#a855f7" onclick="paintPart(0xa855f7)"></div>
+        <div class="swatch" style="background:#f8fafc" onclick="paintPart(0xf8fafc)"></div>
+        <div class="swatch" style="background:#334155" onclick="paintPart(0x334155)"></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><div class="card-lbl"><span>Bed X (<span class="uTag">mm</span>)</span></div><div class="step-row"><input id="bedX" type="number" step="any" value="300" onchange="applyBed()"></div></div>
+        <div class="card"><div class="card-lbl"><span>Bed Y (<span class="uTag">mm</span>)</span></div><div class="step-row"><input id="bedY" type="number" step="any" value="300" onchange="applyBed()"></div></div>
+        <div class="card"><div class="card-lbl"><span>Shell Wall (mm)</span></div><div class="step-row"><input id="shellWall" type="number" step="any" value="2"></div></div>
+        <div class="card"><div class="card-lbl"><span>Bridge Steps (1=Flat, 32=Smooth)</span></div><div class="step-row"><input id="bridgeSteps" type="number" step="1" min="1" max="64" value="24"></div></div>
+        <div class="card"><div class="card-lbl"><span>Bridge Arc Reach (mm, 0=Auto)</span></div><div class="step-row"><input id="bridgeArc" type="number" step="1" min="0" max="300" value="0"></div></div>
+        <div class="card"><div class="card-lbl"><span>Motor RPM</span></div><div class="step-row"><input id="motorRpm" type="number" step="any" value="30"></div></div>
+      </div>
+    </div>
+    <div id="pPhys" class="panel">
+      <button class="blue" style="width:100%;padding:7px;" onclick="loadDemo('gears')">⚙️ Load 3-Gear Reduction Demo</button>
+      <div class="grid4">
+        <button id="physBtn2" onclick="togglePhysics();this.classList.toggle('sim-on',physRunning)">🌍 Gravity</button>
+        <button id="simBtn2" onclick="toggleSim();this.classList.toggle('sim-on',simRunning)">▶️ Run Sim</button>
+        <button onclick="setMotorPart()">⚡ Motor</button>
+        <button onclick="resetSimState()">🔄 Reset</button>
+      </div>
+      <div class="grid2">
+        <div class="card"><div class="card-lbl"><span>Torque (N·cm)</span></div><div class="step-row"><input id="simTorque" type="number" step="any" value="25"></div></div>
+        <div class="card"><div class="card-lbl"><span>Friction (0–1)</span></div><div class="step-row"><input id="simFriction" type="number" step="0.05" value="0.15"></div></div>
+        <div class="card"><div class="card-lbl"><span>Vibration Hz</span></div><div class="step-row"><input id="simVib" type="number" step="any" value="0"></div></div>
+        
+        
+      </div>
+      <div class="card" id="gearTelemetry" style="font-family:monospace;font-size:10px;line-height:1.45;color:#cbd5e1;">
+        <div style="color:#38bdf8;font-weight:700;margin-bottom:2px;">📊 LIVE DRIVETRAIN TELEMETRY</div>
+        <div id="telemRows" style="color:#94a3b8;">Tap ▶ Run Sim or load a demo to inspect Ratio, RPM & Torque per gear.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module">window.statusMsg = { textContent: "" };
+import * as THREE from './vendor/three.module.js';
+import { OrbitControls } from './vendor/OrbitControls.js';
+import { STLExporter } from './vendor/STLExporter.js';
+import { STLLoader } from './vendor/STLLoader.js';
+
+const container = document.getElementById('viewport');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.5, 3000);
+camera.position.set(0, 260, 350);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+const orbit = new OrbitControls(camera, renderer.domElement); orbit.enableDamping = true;
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const d1 = new THREE.DirectionalLight(0xffffff, 0.95); d1.position.set(150, 250, 180); scene.add(d1);
+const d2 = new THREE.DirectionalLight(0x60a5fa, 0.45); d2.position.set(-150, 120, -150); scene.add(d2);
+
+const rimLight = new THREE.DirectionalLight(0x93c5fd, 0.55); rimLight.position.set(0, -120, -180); scene.add(rimLight);
+const PALETTE = [0x3b82f6, 0x10b981, 0xf59e0b, 0xa855f7, 0x06b6d4, 0xec4899, 0x84cc16, 0xf97316, 0x6366f1, 0x14b8a6, 0xeab308, 0x8b5cf6];
+function makeBatteryMat(type, customHex) {
+  const specs = { b18650: ['#10b981','18650 LI-ION','3.7V • 3000mAh',3.7], b21700: ['#0284c7','21700 LI-ION','3.7V • 5000mAh',3.7], baa: ['#f59e0b','AA ALKALINE','1.5V • LR6',1.5], baaa: ['#8b5cf6','AAA ALKALINE','1.5V • LR03',1.5], b9v: ['#ef4444','9V HEAVY DUTY','9.0V • 6LR61',9.0] };
+  const [bg, title, sub, volts] = specs[type];
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128; const ctx = cv.getContext('2d');
+  ctx.fillStyle = customHex || bg; ctx.fillRect(0, 0, 256, 128);
+  ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, 256, 22); ctx.fillRect(0, 106, 256, 22);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 20px sans-serif'; ctx.fillText(title, 18, 60);
+  ctx.fillStyle = '#e2e8f0'; ctx.font = '14px monospace'; ctx.fillText(sub + '   [+]', 18, 86);
+  const tex = new THREE.CanvasTexture(cv);
+  const mat = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.32, metalness: 0.18, clearcoat: 0.35 });
+  mat.userData = { volts }; return mat;
+}
+function makeCadMat(hex) {
+  return new THREE.MeshPhysicalMaterial({ color: hex, roughness: 0.36, metalness: 0.08, clearcoat: 0.25, clearcoatRoughness: 0.35, flatShading: false });
+}
+function computeCreaseNormals(geo, deg = 38) {
+  geo.computeVertexNormals();
+  const pos = geo.attributes.position, nrm = geo.attributes.normal;
+  if (!pos || !nrm) return;
+  const cosLim = Math.cos(THREE.MathUtils.degToRad(deg)), map = new Map();
+  for (let i = 0; i < pos.count; i++) {
+    const k = `${Math.round(pos.getX(i)*1000)},${Math.round(pos.getY(i)*1000)},${Math.round(pos.getZ(i)*1000)}`;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(i);
+  }
+  const out = new Float32Array(nrm.array.length);
+  for (const idxs of map.values()) {
+    for (const i of idxs) {
+      let nx = 0, ny = 0, nz = 0;
+      const ix = nrm.getX(i), iy = nrm.getY(i), iz = nrm.getZ(i);
+      for (const j of idxs) {
+        const jx = nrm.getX(j), jy = nrm.getY(j), jz = nrm.getZ(j);
+        if (ix*jx + iy*jy + iz*jz >= cosLim) { nx += jx; ny += jy; nz += jz; }
+      }
+      const len = Math.hypot(nx, ny, nz) || 1;
+      out[i*3] = nx/len; out[i*3+1] = ny/len; out[i*3+2] = nz/len;
+    }
+  }
+  geo.setAttribute('normal', new THREE.BufferAttribute(out, 3));
+}
+function styleMesh(mesh) {
+  mesh.frustumCulled = false;
+  if (mesh.geometry) { computeCreaseNormals(mesh.geometry, 38); mesh.geometry.computeBoundingSphere(); }
+  const old = mesh.children.find(c => c.userData.isEdge); if (old) mesh.remove(old);
+  if (mesh.userData && mesh.userData.type === 'grouped') return;
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 42), new THREE.LineBasicMaterial({ color: 0x060911, transparent: true, opacity: 0.48 }));
+  edges.userData.isEdge = true; mesh.add(edges);
+}
+let bedGroup = new THREE.Group(); scene.add(bedGroup);
+let bedW = 300, bedD = 300, unit = 'mm', simRunning = false;
+const INCH = 25.4, toMM = v => unit === 'in' ? v * INCH : v, fromMM = v => unit === 'in' ? +(v / INCH).toFixed(4) : +(v.toFixed(2));
+
+window.setBed = (wMM, dMM) => {
+  bedW = wMM; bedD = dMM;
+  document.getElementById('bedX').value = fromMM(bedW); document.getElementById('bedY').value = fromMM(bedD);
+  bedGroup.clear();
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(bedW, 2, bedD), new THREE.MeshStandardMaterial({ color: 0x1a2232, roughness: 0.6 }));
+  plate.position.y = -1.05; bedGroup.add(plate);
+  const grid = new THREE.GridHelper(Math.max(bedW, bedD), Math.round(Math.max(bedW, bedD) / 10), 0x3b82f6, 0x2a3447);
+  grid.scale.set(bedW / Math.max(bedW, bedD), 1, bedD / Math.max(bedW, bedD)); bedGroup.add(grid);
+  bedGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(bedW, 0.2, bedD)), new THREE.LineBasicMaterial({ color: 0x60a5fa })));
+};
+window.applyBed = () => setBed(toMM(parseFloat(document.getElementById('bedX').value)||300), toMM(parseFloat(document.getElementById('bedY').value)||300));
+setBed(300, 300);
+
+let parts = [], selected = null, prevSelected = null, selBox = null, count = 0;
+const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+window.openTab = (id, btn) => { if (id === 'pSize' && selected) { dragMode = 'size'; tapCount = 1; } else if (id === 'pMove' && selected && dragMode === 'size') { dragMode = 'move'; tapCount = 0; } document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); document.getElementById(id).classList.add('active'); btn.classList.add('active'); };
+window.setCam = (v) => { if (v==='top') camera.position.set(0,340,0.1); else if (v==='front') camera.position.set(0,70,290); else if (v==='right') camera.position.set(290,70,0); else camera.position.set(170,180,210); orbit.target.set(0,0,0); orbit.update(); };
+window.toggleUnits = () => { unit = unit === 'mm' ? 'in' : 'mm'; document.getElementById('unitBtn').textContent = unit.toUpperCase(); document.querySelectorAll('.uTag').forEach(el => el.textContent = unit); document.getElementById('bedX').value = fromMM(bedW); document.getElementById('bedY').value = fromMM(bedD); if (selected) syncUI(); };
+function normGeo(g, targetZ) {
+  g.computeBoundingBox();
+  const bb = g.boundingBox, c = new THREE.Vector3();
+  bb.getCenter(c);
+  g.translate(-c.x, -c.y, -c.z);
+  const curH = bb.max.y - bb.min.y;
+  if (targetZ && curH > 0.01) g.scale(1, targetZ / curH, 1);
+  return g;
+}
+function buildGeo(type, p) {
+  return normGeo(_rawGeo(type, p), type === 'sphere' ? null : p.z);
+}
+function _rawGeo(type, p) {
+  const rad = p.rad || (p.x / 2), holeR = Math.min(rad - 0.8, Math.max(0, p.holeR || 0)), teeth = Math.max(3, Math.round(p.teeth || 6));
+  if (['b18650','b21700','baa','baaa'].includes(type)) {
+    const g = new THREE.CylinderGeometry(rad, rad, p.z, 96);
+    return g;
+  }
+  if (type === 'b9v') {
+    return new THREE.BoxGeometry(p.x, p.z, p.y);
+  }
+  if (type === 'motor') {
+    const pos = [], pushG = (g) => { const ng = g.index ? g.toNonIndexed() : g; const a = ng.attributes.position.array; for (let i = 0; i < a.length; i++) pos.push(a[i]); };
+    const bodyH = p.z * 0.68, shaftH = p.z * 0.32;
+    const body = new THREE.CylinderGeometry(rad, rad, bodyH, 36); body.translate(0, -shaftH / 2, 0); pushG(body);
+    const shaft = new THREE.CylinderGeometry(Math.max(2, holeR || 3.5), Math.max(2, holeR || 3.5), shaftH, 24); shaft.translate(0, bodyH / 2, 0); pushG(shaft);
+    const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); out.computeVertexNormals(); return out;
+  }
+  if (type === 'bolt') {
+    const pos = [], pushG = (g) => { const ng = g.index ? g.toNonIndexed() : g; const a = ng.attributes.position.array; for (let i = 0; i < a.length; i++) pos.push(a[i]); };
+    const headH = Math.min(8, p.z * 0.25), shaftH = p.z - headH;
+    const head = new THREE.CylinderGeometry(rad, rad, headH, 6); head.translate(0, shaftH / 2, 0); pushG(head);
+    const shaft = new THREE.CylinderGeometry(rad * 0.56, rad * 0.56, shaftH, 32); shaft.translate(0, -headH / 2, 0); pushG(shaft);
+    const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); out.computeVertexNormals(); return out;
+  }
+  if (type === 'bearing') {
+    const oR = rad, iR = Math.max(2, holeR || 6), midR = (oR + iR) / 2, ballR = Math.max(1.2, (oR - iR) * 0.24);
+    const makeRingTube = (rOut, rIn) => { const s = new THREE.Shape(); s.absarc(0,0,rOut,0,Math.PI*2,false); const h = new THREE.Path(); h.absarc(0,0,rIn,0,Math.PI*2,true); s.holes.push(h); const g = new THREE.ExtrudeGeometry(s, { depth: p.z, bevelEnabled: true, bevelSize: 0.3, bevelThickness: 0.3, bevelSegments: 2, curveSegments: 96 }); g.rotateX(-Math.PI/2); return g; };
+    const pos = []; const pushGeo = (g) => { const ng = g.index ? g.toNonIndexed() : g; const a = ng.attributes.position.array; for (let i = 0; i < a.length; i++) pos.push(a[i]); };
+    pushGeo(makeRingTube(oR, midR + ballR * 0.45)); pushGeo(makeRingTube(midR - ballR * 0.45, iR));
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2, bg = new THREE.SphereGeometry(ballR, 14, 10); bg.translate(Math.cos(a)*midR, p.z/2, Math.sin(a)*midR); pushGeo(bg); }
+    const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); out.computeVertexNormals(); return out;
+  }
+  if (type === 'pulley') {
+    const pts = [new THREE.Vector2(Math.max(1, holeR || 5), -p.z/2), new THREE.Vector2(rad, -p.z/2), new THREE.Vector2(rad, -p.z*0.3), new THREE.Vector2(rad*0.84, 0), new THREE.Vector2(rad, p.z*0.3), new THREE.Vector2(rad, p.z/2), new THREE.Vector2(Math.max(1, holeR || 5), p.z/2)];
+    return new THREE.LatheGeometry(pts, 48);
+  }
+  if (type === 'slot') {
+    const w = p.x, d = p.y, r = d / 2, s = new THREE.Shape(); s.absarc(-w/2+r, 0, r, Math.PI/2, Math.PI*1.5, false); s.absarc(w/2-r, 0, r, -Math.PI/2, Math.PI/2, false); s.closePath();
+    const h = new THREE.Path(), hr = Math.max(1.5, r * 0.42); h.absarc(-w/2+r, 0, hr, Math.PI/2, Math.PI*1.5, false); h.absarc(w/2-r, 0, hr, -Math.PI/2, Math.PI/2, false); h.closePath(); s.holes.push(h);
+    const g = new THREE.ExtrudeGeometry(s, { depth: p.z, bevelEnabled: false, curveSegments: 32 }); g.rotateX(-Math.PI/2); return g;
+  }
+  if (type === 'hemi') return new THREE.SphereGeometry(rad, 96, 48, 0, Math.PI * 2, 0, Math.PI / 2);
+  if (type === 'pyramid') return new THREE.ConeGeometry(rad, p.z, 4);
+  if (type === 'poly') return new THREE.CylinderGeometry(rad, rad, p.z, teeth);
+  if (type === 'washer') {
+    const s = new THREE.Shape(); s.absarc(0, 0, rad, 0, Math.PI * 2, false);
+    if (holeR > 0.2) { const h = new THREE.Path(); h.absarc(0, 0, holeR, 0, Math.PI * 2, true); s.holes.push(h); }
+    const g = new THREE.ExtrudeGeometry(s, { depth: p.z, bevelEnabled: true, bevelSize: 0.4, bevelThickness: 0.4, bevelSegments: 2, curveSegments: 96 }); g.rotateX(-Math.PI / 2); return g;
+  }
+  if (type === 'cyl') return new THREE.CylinderGeometry(rad, rad, p.z, 64);
+  if (type === 'cone') return new THREE.CylinderGeometry(0.2, rad, p.z, 64);
+  if (type === 'sphere') return new THREE.SphereGeometry(rad, 48, 32);
+  if (type === 'torus') { const g = new THREE.TorusGeometry(rad, Math.max(1.5, p.z / 4), 28, 64); g.rotateX(Math.PI / 2); return g; }
+  if (type === 'wedge') { const s = new THREE.Shape(); s.moveTo(-p.x/2,-p.z/2); s.lineTo(p.x/2,-p.z/2); s.lineTo(-p.x/2,p.z/2); s.closePath(); const g = new THREE.ExtrudeGeometry(s, { depth: p.y, bevelEnabled: false }); g.translate(0,0,-p.y/2); return g; }
+  if (type === 'helix') {
+    const pts = [], turns = Math.max(1, Math.min(20, teeth)), steps = Math.round(turns * 40);
+    for (let i = 0; i <= steps; i++) { const t = i / steps, a = t * turns * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a)*rad, (t - 0.5)*p.z, Math.sin(a)*rad)); }
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), steps, Math.max(1, holeR || 2.5), 16, false);
+  }
+  if (type === 'dshaft') {
+    const s = new THREE.Shape(); s.absarc(0, 0, rad, -Math.PI * 0.75, Math.PI * 0.75, false); s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, { depth: p.z, bevelEnabled: false, curveSegments: 96 }); g.rotateX(-Math.PI/2); g.translate(0,-p.z/2,0); return g;
+  }
+  if (type === 'hex' || type === 'tube' || type === 'boss') {
+    const s = new THREE.Shape();
+    if (type === 'hex') { for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; i === 0 ? s.moveTo(Math.cos(a)*rad, Math.sin(a)*rad) : s.lineTo(Math.cos(a)*rad, Math.sin(a)*rad); } s.closePath(); }
+    else s.absarc(0, 0, rad, 0, Math.PI * 2, false);
+    if (holeR > 0.2) { const h = new THREE.Path(); h.absarc(0, 0, holeR, 0, Math.PI * 2, true); s.holes.push(h); }
+    const g = new THREE.ExtrudeGeometry(s, { depth: p.z, bevelEnabled: false, curveSegments: 96 }); g.rotateX(-Math.PI/2); g.translate(0,-p.z/2,0); return g;
+  }
+  if (type === 'gear') {
+    const rOut = rad, rIn = rad * 0.82, s = new THREE.Shape();
+    for (let i = 0; i < teeth * 4; i++) { const a = (i / (teeth * 4)) * Math.PI * 2, r = (i % 4 === 1 || i % 4 === 2) ? rOut : rIn; i === 0 ? s.moveTo(Math.cos(a)*r, Math.sin(a)*r) : s.lineTo(Math.cos(a)*r, Math.sin(a)*r); }
+    s.closePath(); if (holeR > 0.2) { const h = new THREE.Path(); h.absarc(0,0,holeR,0,Math.PI*2,true); s.holes.push(h); }
+    const g = new THREE.ExtrudeGeometry(s, { depth: p.z, bevelEnabled: true, bevelSize: 0.25, bevelThickness: 0.25, bevelSegments: 2 }); g.rotateX(-Math.PI/2); g.translate(0,-p.z/2,0); return g;
+  }
+  if (p.rad > 0) {
+    const r = Math.min(p.rad, p.x/2.1, p.y/2.1, p.z/2.1), w = p.x - r*2, d = p.y - r*2, h = p.z - r*2;
+    const s = new THREE.Shape(); s.moveTo(-w/2,-d/2); s.lineTo(w/2,-d/2); s.lineTo(w/2,d/2); s.lineTo(-w/2,d/2); s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.1,h), bevelEnabled: true, bevelSegments: 5, steps: 1, bevelSize: r, bevelThickness: r }); g.rotateX(-Math.PI/2); g.translate(0,-h/2,0); return g;
+  }
+  return new THREE.BoxGeometry(p.x, p.z, p.y);
+}
+function clampAboveBed(m) {
+  if (!m) return;
+  m.updateMatrixWorld(true);
+  const minY = new THREE.Box3().setFromObject(m).min.y;
+  if (autoBedHug || isOnBed(m)) { m.position.y -= minY; m.userData.grounded = true; }
+  else if (minY < 0) { m.position.y -= minY; }
+}
+window.nudgeStepDim = (axis, dir) => {
+  if (!selected) return;
+  const st = parseFloat(document.getElementById('moveStep').value) || 1;
+  const id = 'in' + axis.toUpperCase();
+  const cur = parseFloat(document.getElementById(id).value) || 0;
+  setDim(axis, Math.max(0.1, cur + dir * st));
+};
+let helperGroup = new THREE.Group(), rotRings = [], activeRotAxis = 'y';
+scene.add(helperGroup);
+function makeRing(r, color, axisName, rotX, rotY) {
+  const isAct = activeRotAxis === axisName;
+  const gVis = new THREE.TorusGeometry(r, isAct ? 1.0 : 0.55, 12, 72);
+  const gHit = new THREE.TorusGeometry(r, 7.5, 8, 48);
+  if (rotX) { gVis.rotateX(rotX); gHit.rotateX(rotX); }
+  if (rotY) { gVis.rotateY(rotY); gHit.rotateY(rotY); }
+  const mVis = new THREE.Mesh(gVis, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isAct ? 1.0 : 0.45, depthTest: false }));
+  const mHit = new THREE.Mesh(gHit, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.0, side: THREE.FrontSide, depthWrite: false, depthTest: false }));
+  mVis.renderOrder = isAct ? 1000 : 998;
+  mHit.userData.rotAxis = axisName; mHit.userData.visRing = mVis;
+  rotRings.push(mHit); helperGroup.add(mVis); helperGroup.add(mHit);
+}
+let moveHandles = [], activeMoveAxis = 'xz';
+function makeArrow(dir, color, axisName, len) {
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, len, 12), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+  shaft.position.y = len / 2; shaft.renderOrder = 1001; g.add(shaft);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(2.6, 6.5, 16), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+  tip.position.y = len + 3; tip.renderOrder = 1001; g.add(tip);
+  const hit = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 6.5, len + 10, 8), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.0, side: THREE.FrontSide, depthWrite: false, depthTest: false }));
+  hit.position.y = (len + 6) / 2; hit.userData.moveAxis = axisName; g.add(hit);
+  moveHandles.push(hit);
+  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  return g;
+}
+function rebuildVisualHelpers() {
+  helperGroup.clear(); rotRings = []; moveHandles = [];
+  if (!selected) return;
+  selected.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(selected), c = new THREE.Vector3(); b.getCenter(c);
+  if (dragMode === 'move') {
+    const len = Math.max(22, Math.max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.55);
+    const axX = makeArrow(new THREE.Vector3(1,0,0), 0xef4444, 'x', len); axX.position.copy(c); helperGroup.add(axX);
+    const axY = makeArrow(new THREE.Vector3(0,0,1), 0x10b981, 'z', len); axY.position.copy(c); helperGroup.add(axY);
+    const axZ = makeArrow(new THREE.Vector3(0,1,0), 0x3b82f6, 'y', len); axZ.position.copy(c); helperGroup.add(axZ);
+    const puck = new THREE.Mesh(new THREE.SphereGeometry(3.6, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfacc15, depthTest: false }));
+    puck.position.copy(c); puck.renderOrder = 1002; puck.userData.moveAxis = 'xz';
+    moveHandles.push(puck); helperGroup.add(puck);
+  } else if (dragMode === 'size') {
+    const matG = new THREE.LineBasicMaterial({ color: 0x00ff87 });
+    const addLine = (p1, p2) => helperGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([p1, p2]), matG));
+    addLine(new THREE.Vector3(b.min.x, 0.2, b.max.z + 5), new THREE.Vector3(b.max.x, 0.2, b.max.z + 5));
+    addLine(new THREE.Vector3(b.max.x + 5, 0.2, b.min.z), new THREE.Vector3(b.max.x + 5, 0.2, b.max.z));
+    addLine(new THREE.Vector3(b.min.x - 5, b.min.y, b.min.z), new THREE.Vector3(b.min.x - 5, b.max.y, b.min.z));
+  } else if (dragMode === 'rotate') {
+    const r = Math.max(24, Math.hypot(b.max.x - b.min.x, b.max.z - b.min.z) * 0.68);
+    makeRing(r, 0x3b82f6, 'y', Math.PI / 2, 0);
+    makeRing(r, 0xef4444, 'x', 0, Math.PI / 2);
+    makeRing(r, 0x10b981, 'z', 0, 0);
+    rotRings.forEach(m => { m.position.copy(c); m.userData.visRing.position.copy(c); });
+  }
+}
+window.setExactRot = (deg) => {
+  if (!selected) return;
+  if (!selected.userData.rotDeg) selected.userData.rotDeg = { x: 0, y: 0, z: 0 };
+  const target = (((parseFloat(deg) || 0) % 360) + 360) % 360;
+  const delta = target - selected.userData.rotDeg[activeRotAxis];
+  const ax = activeRotAxis === 'x' ? new THREE.Vector3(1,0,0) : activeRotAxis === 'y' ? new THREE.Vector3(0,1,0) : new THREE.Vector3(0,0,1);
+  selected.rotateOnWorldAxis(ax, THREE.MathUtils.degToRad(delta));
+  selected.userData.rotDeg[activeRotAxis] = target;
+  if (wasGDim) snapBottomToBed(selected); else if (autoBedHug || isOnBed(selected)) snapBottomToBed(selected); else clampAboveBed(selected); syncUI();
+};
+function updatePins() {
+  const ids = ['pinW','pinL','pinH','pinR'];
+  if (!selected) { ids.forEach(i => document.getElementById(i).style.display = 'none'); return; }
+  const b = new THREE.Box3().setFromObject(selected), c = new THREE.Vector3(); b.getCenter(c);
+  const pts = {
+    pinW: new THREE.Vector3(c.x, 0.2, b.max.z + 5),
+    pinL: new THREE.Vector3(b.max.x + 5, 0.2, c.z),
+    pinH: new THREE.Vector3(b.min.x - 5, c.y, b.min.z),
+    pinR: new THREE.Vector3(c.x, b.max.y + 8, c.z)
+  };
+  const rect = { width: container.clientWidth, height: container.clientHeight };
+  for (const [id, v] of Object.entries(pts)) {
+    v.project(camera);
+    const el = document.getElementById(id);
+    const show = dragMode === 'rotate' ? (id === 'pinR') : dragMode === 'size' ? (id !== 'pinR') : false;
+    el.style.display = show ? 'flex' : 'none';
+    el.style.left = ((v.x * 0.5 + 0.5) * rect.width) + 'px';
+    el.style.top = ((-v.y * 0.5 + 0.5) * rect.height) + 'px';
+  }
+}
+function syncUI() {
+  ['Move','Size','Rot'].forEach(k => { const el = document.getElementById('mBtn'+k); const on = (k==='Move'&&dragMode==='move')||(k==='Size'&&dragMode==='size')||(k==='Rot'&&dragMode==='rotate'); if (el) { el.style.color = on ? '#00ff87' : '#e2e8f0'; el.style.background = on ? 'rgba(0,255,135,0.14)' : 'transparent'; } });
+  const tree = document.getElementById('partTree'); tree.innerHTML = '';
+  parts.forEach(m => { const b = document.createElement('button'); b.className = 'tree-item' + (multiSel.includes(m) ? ' sel' : ''); b.textContent = (m.userData.isHole ? '🕳️ ' : m.userData.type === 'gear' ? '⚙️ ' : '🔷 ') + m.userData.name; b.onclick = () => selectMesh(m); tree.appendChild(b); });
+  if (selBox) { scene.remove(selBox); selBox = null; } rebuildVisualHelpers();
+  if (!selected) { ['Move','Size','Rot'].forEach(k => { const el = document.getElementById('mBtn'+k); const on = (k==='Move'&&dragMode==='move')||(k==='Size'&&dragMode==='size')||(k==='Rot'&&dragMode==='rotate'); if (el) { el.style.color = on ? '#00ff87' : '#e2e8f0'; el.style.background = on ? 'rgba(0,255,135,0.12)' : 'transparent'; } }); document.getElementById('hudDim').textContent = 'Empty bed • Tap Create to add a shape'; return; }
+  selBox = new THREE.Group(); const targets = multiSel.length ? multiSel : [selected]; targets.forEach(m => selBox.add(new THREE.BoxHelper(m, 0x00ff87))); scene.add(selBox);
+  selected.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(selected), sz = new THREE.Vector3(); box.getSize(sz);
+  document.getElementById('inX').value = fromMM(sz.x); document.getElementById('inY').value = fromMM(sz.z); document.getElementById('inZ').value = fromMM(sz.y);
+  document.getElementById('inRad').value = fromMM((selected.userData.params.rad || 0) * 2); document.getElementById('inHoleR').value = fromMM((selected.userData.params.holeR || 0) * 2);
+  document.getElementById('inTeeth').value = selected.userData.params.teeth || 16;
+  document.getElementById('posX').textContent = fromMM(selected.position.x) + ' ' + unit; document.getElementById('posY').textContent = fromMM(selected.position.z) + ' ' + unit; document.getElementById('posZ').textContent = fromMM(box.min.y) + ' ' + unit;
+  document.getElementById('btnHole').classList.toggle('hole-on', !!selected.userData.isHole);
+  const lblMap = { x: ['X','#ef4444'], z: ['Y','#10b981'], y: ['Z','#3b82f6'] };
+  const [aName, aCol] = lblMap[activeRotAxis] || ['Z','#3b82f6']; const rr = document.getElementById('rotReadout'); if (rr && selected.userData.rotDeg) rr.textContent = `${Math.round(selected.userData.rotDeg.x)}° / ${Math.round(selected.userData.rotDeg.z)}° / ${Math.round(selected.userData.rotDeg.y)}°`;
+  document.getElementById('rAxisLbl').textContent = aName;
+  const pinR = document.getElementById('pinR'), fRot = document.getElementById('fRot');
+  pinR.style.borderColor = aCol; pinR.style.color = aCol; fRot.style.color = aCol;
+  if (!selected.userData.rotDeg) selected.userData.rotDeg = { x: 0, y: 0, z: 0 }; if (document.activeElement !== fRot) fRot.value = Math.round(selected.userData.rotDeg[activeRotAxis] || 0);
+  if (document.activeElement.id !== 'fW') document.getElementById('fW').value = fromMM(sz.x);
+  if (document.activeElement.id !== 'fL') document.getElementById('fL').value = fromMM(sz.z);
+  if (document.activeElement.id !== 'fH') document.getElementById('fH').value = fromMM(sz.y);
+  const modeLbl = dragMode === 'rotate' ? '🔄 ROT 3-AXIS' : dragMode === 'size' ? '📐 SIZE L/W/H' : '✥ MOVE';
+  const rowsEl = document.getElementById('telemRows');
+  if (rowsEl) {
+    if (statusMsg) {
+      rowsEl.innerHTML = `<span style="color:#f59e0b;">${statusMsg}</span>`;
+    } else {
+      const m0 = motors.at(0), w0 = omega.get(m0.uuid) || baseOmega;
+      const eff = Math.max(0.45, 1.0 - fric * 0.65);
+      const lines = gears.map(g => {
+        if (!omega.has(g.uuid)) return `<div>• ${g.userData.name}: <span style="color:#64748b;">Idle (0 RPM)</span></div>`;
+        const wg = omega.get(g.uuid), ratio = Math.abs(w0 / wg), gRpm = Math.abs((wg * 60) / (Math.PI * 2));
+        const gTrq = trq * voltScale * ratio * Math.pow(eff, ratio > 1.05 ? 1 : 0);
+        const dir = wg >= 0 ? 'CW ↻' : 'CCW ↺';
+        const hexCol = '#' + (g.material.color ? g.material.color.getHexString() : '38bdf8'); return `<div onclick="selectMesh(parts.find(x=>x.uuid==='${g.uuid}'))" style="cursor:pointer;"><span style="color:${hexCol};font-size:13px;">●</span> <b style="color:${hexCol};">${g.userData.name}</b> | Ratio <b>1:${ratio.toFixed(2)}</b> | <span style="color:#00ff87;">${gRpm.toFixed(1)} RPM</span> (${dir}) | <span style="color:#fbbf24;">${gTrq.toFixed(1)} N·cm</span></div>`;
+      });
+      const watts = (trq * voltScale * 0.01) * Math.abs(w0);
+      lines.push(`<div style="margin-top:3px;color:#38bdf8;">Efficiency: ${(eff*100).toFixed(0)}% • Mech Power: ${watts.toFixed(2)} W</div>`);
+      rowsEl.innerHTML = lines.join('');
+    }
+  }
+  ['Move','Size','Rot'].forEach(k => { const el = document.getElementById('mBtn'+k); const on = (k==='Move'&&dragMode==='move')||(k==='Size'&&dragMode==='size')||(k==='Rot'&&dragMode==='rotate'); if (el) { el.style.color = on ? '#00ff87' : '#e2e8f0'; el.style.background = on ? 'rgba(0,255,135,0.12)' : 'transparent'; } }); document.getElementById('hudDim').textContent = `[${modeLbl}] ${selected.userData.name}: ${fromMM(sz.x)}×${fromMM(sz.z)}×${fromMM(sz.y)} ${unit}`;
+}
+let multiSel = [], boxSelectMode = false, boxStart = null;
+window.toggleBoxSelect = () => {
+  boxSelectMode = !boxSelectMode;
+  const btn = document.getElementById('boxSelBtn');
+  btn.classList.toggle('blue', boxSelectMode);
+  btn.textContent = boxSelectMode ? '⬚ Done' : '⬚ Select';
+  orbit.enabled = !boxSelectMode;
+};
+function selectBoxArea(x1, y1, x2, y2) {
+  const minX = Math.min(x1, x2), maxX = Math.max(x1, x2), minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
+  const w = container.clientWidth, h = container.clientHeight;
+  multiSel = parts.filter(m => {
+    if (!m.visible) return false;
+    m.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(m);
+    let oMinX = Infinity, oMaxX = -Infinity, oMinY = Infinity, oMaxY = -Infinity;
+    for (const cx of [b.min.x, b.max.x]) for (const cy of [b.min.y, b.max.y]) for (const cz of [b.min.z, b.max.z]) {
+      const v = new THREE.Vector3(cx, cy, cz).project(camera);
+      const sx = (v.x * 0.5 + 0.5) * w, sy = (-v.y * 0.5 + 0.5) * h;
+      if (sx < oMinX) oMinX = sx; if (sx > oMaxX) oMaxX = sx;
+      if (sy < oMinY) oMinY = sy; if (sy > oMaxY) oMaxY = sy;
+    }
+    return oMaxX >= minX && oMinX <= maxX && oMaxY >= minY && oMinY <= maxY;
+  });
+  if (multiSel.length) selectMesh(multiSel.at(-1), true);
+  else { selectMesh(null); syncUI(); }
+}
+function selectMesh(m, keepMulti) { if (m && m !== selected) prevSelected = selected; if (!keepMulti) multiSel = m ? [m] : []; parts.forEach(x => { if (x.material?.emissive) x.material.emissive.setHex(multiSel.includes(x) ? (x.userData.isHole ? 0x475569 : 0x2563eb) : 0x000000); x.material.emissiveIntensity = multiSel.includes(x) ? 0.55 : 0; }); selected = m; syncUI(); }
+const BATT_SPECS = {
+  b18650: { x: 18.4, y: 18.4, z: 65.0, rad: 9.2, holeR: 0, teeth: 16, volts: 3.7, capR: 3.5, capH: 1.0 },
+  b21700: { x: 21.2, y: 21.2, z: 70.0, rad: 10.6, holeR: 0, teeth: 16, volts: 3.7, capR: 4.0, capH: 1.0 },
+  baa:    { x: 14.5, y: 14.5, z: 50.5, rad: 7.25, holeR: 0, teeth: 16, volts: 1.5, capR: 2.75, capH: 1.5 },
+  baaa:   { x: 10.5, y: 10.5, z: 44.5, rad: 5.25, holeR: 0, teeth: 16, volts: 1.5, capR: 1.9, capH: 1.2 },
+  b9v:    { x: 26.5, y: 17.5, z: 48.5, rad: 0, holeR: 0, teeth: 16, volts: 9.0, capR: 2.5, capH: 3.2 }
+};
+function addBatteryTerminals(mesh, type, p) {
+  const metal = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.9, roughness: 0.18 });
+  const darkMetal = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.85, roughness: 0.28 });
+  const insul = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
+  if (type === 'b9v') {
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(p.x - 1.6, 0.8, p.y - 1.6), darkMetal);
+    plate.position.set(0, p.z / 2 + 0.4, 0); mesh.add(plate);
+    const tPos = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.3, 3.2, 24), metal);
+    tPos.position.set(-5.8, p.z / 2 + 2.0, 0); mesh.add(tPos);
+    const tPosIn = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 3.3, 20), darkMetal);
+    tPosIn.position.set(-5.8, p.z / 2 + 2.0, 0); mesh.add(tPosIn);
+    const tNeg = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 3.2, 6), metal);
+    tNeg.position.set(5.8, p.z / 2 + 2.0, 0); mesh.add(tNeg);
+  } else if (type === 'b18650' || type === 'b21700') {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(p.rad * 0.88, p.rad * 0.88, 0.35, 36), insul);
+    ring.position.set(0, p.z / 2 + 0.18, 0); mesh.add(ring);
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(p.rad * 0.62, p.rad * 0.62, 0.45, 36), metal);
+    pad.position.set(0, p.z / 2 + 0.24, 0); mesh.add(pad);
+    const bot = new THREE.Mesh(new THREE.CylinderGeometry(p.rad * 0.94, p.rad * 0.94, 0.6, 36), metal);
+    bot.position.set(0, -p.z / 2 + 0.3, 0); mesh.add(bot);
+  } else {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(p.rad * 0.85, p.rad * 0.85, 0.3, 32), insul);
+    ring.position.set(0, p.z / 2 + 0.15, 0); mesh.add(ring);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(p.capR, p.capR * 1.05, p.capH, 28), metal);
+    cap.position.set(0, p.z / 2 + p.capH / 2, 0); mesh.add(cap);
+    const bot = new THREE.Mesh(new THREE.CylinderGeometry(p.rad * 0.94, p.rad * 0.94, 0.6, 32), metal);
+    bot.position.set(0, -p.z / 2 + 0.3, 0); mesh.add(bot);
+  }
+}
+window.addShape = (type) => {
+  pushUndo(); count++;
+  if (BATT_SPECS[type]) {
+    const p = { ...BATT_SPECS[type] };
+    const m = new THREE.Mesh(buildGeo(type, p), makeBatteryMat(type)); styleMesh(m); addBatteryTerminals(m, type, p);
+    m.userData = { name: `${type.slice(1).toUpperCase()} (${p.volts}V)`, type, params: p, isHole: false, volts: p.volts };
+    m.position.set(0, p.z / 2, 0); m.userData.grounded = true; m.userData.grounded = true; scene.add(m); parts.push(m); selectMesh(m); dropToBed(); return;
+  } const isRound = ['cyl','sphere','cone','tube','torus','gear','hex','dshaft','helix','hemi','poly','pyramid','washer','bearing','bolt','motor'].includes(type);
+  const p = type === 'boss' ? { x: 8, y: 8, z: 10, rad: 4, holeR: 2, teeth: 16 } : type === 'helix' ? { x: 36, y: 36, z: 42, rad: 18, holeR: 2.5, teeth: 5 } : ['washer','bearing'].includes(type) ? { x: 44, y: 44, z: type==='bearing'?10:4, rad: 22, holeR: 8, teeth: 16 } : type === 'bolt' ? { x: 16, y: 16, z: 32, rad: 8, holeR: 0, teeth: 6 } : type === 'motor' ? { x: 28, y: 28, z: 38, rad: 14, holeR: 3.5, teeth: 16 } : isRound ? { x: 40, y: 40, z: 20, rad: 20, holeR: ['tube','gear','hex'].includes(type) ? 7 : 0, teeth: type === 'poly' ? 6 : 18 } : { x: 40, y: 40, z: 20, rad: 0, holeR: 0, teeth: 16 };
+  const m = new THREE.Mesh(buildGeo(type, p), makeCadMat(PALETTE[(count - 1) % PALETTE.length])); styleMesh(m);
+  m.userData = { name: `${type.toUpperCase()} ${count}`, type, params: p, isHole: false, childrenBackup: null };
+  m.position.set(0, p.z / 2, 0); m.userData.grounded = true; scene.add(m); parts.push(m); selectMesh(m); dropToBed(); if (['gear','hex','tube','boss','helix','poly','washer','bearing','bolt','motor'].includes(type)) openTab('pDim', document.querySelectorAll('.tab').item(1));
+};
+function loadSTLBuffer(buf, rawName) {
+  const geo = new STLLoader().parse(buf);
+  geo.rotateX(-Math.PI / 2); geo.computeBoundingBox();
+  const c = new THREE.Vector3(); geo.boundingBox.getCenter(c);
+  geo.translate(-c.x, -geo.boundingBox.min.y, -c.z);
+  count++;
+  const m = new THREE.Mesh(geo, makeCadMat(PALETTE[(count - 1) % PALETTE.length]));
+  styleMesh(m);
+  m.userData = { name: rawName.replace(/\.stl$/i, '').slice(0, 14), type: 'imported', params: { rad: 0, holeR: 0, teeth: 16 }, isHole: false };
+  m.userData.grounded = true; scene.add(m); parts.push(m); selectMesh(m); dropToBed();
+}
+window.importSTLFile = async (inp) => {
+  try {
+    const file = inp.files && inp.files[0]; if (!file) return;
+    loadSTLBuffer(await file.arrayBuffer(), file.name);
+  } catch (err) { alert('STL Import Error: ' + err.message); }
+  inp.value = '';
+};
+window.openImportModal = async () => {
+  document.getElementById('impModal').style.display = 'flex';
+  const box = document.getElementById('serverStlList'); box.innerHTML = '<div style="font-size:11px;color:#94a3b8;">Scanning folders...</div>';
+  const d = await (await fetch('/api/cad/list_stls')).json();
+  box.innerHTML = d.files.length ? '' : '<div style="font-size:11px;color:#64748b;">No .stl files found in Download/Uploads</div>';
+  d.files.forEach(f => {
+    const b = document.createElement('button'); b.style.textAlign = 'left'; b.textContent = `📦 ${f.name} (${f.dir})`;
+    b.onclick = async () => { document.getElementById('impModal').style.display = 'none'; const res = await fetch('/api/cad/get_stl?path=' + encodeURIComponent(f.path)); loadSTLBuffer(await res.arrayBuffer(), f.name); };
+    box.appendChild(b);
+  });
+};
+window.setDim = (axis, val) => {
+  if (!selected) return; pushUndo(); const wasGDim = autoBedHug || isOnBed(selected); const raw = parseFloat(val) || 0, mm = axis === 'teeth' ? Math.max(4, Math.round(raw)) : Math.max(['rad','holeR'].includes(axis) ? 0 : 0.1, toMM(raw));
+  if (['grouped','bridge','imported'].includes(selected.userData.type)) {
+    const sz = new THREE.Vector3(); new THREE.Box3().setFromObject(selected).getSize(sz);
+    if (axis === 'x') selected.scale.x *= mm / sz.x; if (axis === 'y') selected.scale.z *= mm / sz.z; if (axis === 'z') selected.scale.y *= mm / sz.y;
+  } else {
+    const isRound = ['cyl','sphere','cone','tube','torus','gear','hex','dshaft','helix','hemi','poly','pyramid','washer','bearing','bolt','motor'].includes(selected.userData.type);
+    if (axis === 'rad') { selected.userData.params.rad = mm / 2; if (isRound) { selected.userData.params.x = mm; selected.userData.params.y = mm; } }
+    else if (axis === 'holeR') { selected.userData.params.holeR = mm / 2; }
+    else if ((axis === 'x' || axis === 'y') && isRound) { selected.userData.params.x = mm; selected.userData.params.y = mm; selected.userData.params.rad = mm / 2; }
+    else { selected.userData.params[axis] = mm; }
+    const oldMinY = new THREE.Box3().setFromObject(selected).min.y;
+    selected.geometry.dispose(); selected.geometry = buildGeo(selected.userData.type, selected.userData.params); styleMesh(selected);
+    selected.position.y += (oldMinY - new THREE.Box3().setFromObject(selected).min.y);
+  }
+  if (wasGDim) snapBottomToBed(selected); else if (autoBedHug || isOnBed(selected)) snapBottomToBed(selected); else clampAboveBed(selected); syncUI();
+};
+window.nudgeDim = (axis, d) => { if (!selected) return; const id = axis === 'rad' ? 'inRad' : axis === 'holeR' ? 'inHoleR' : axis === 'teeth' ? 'inTeeth' : 'in' + axis.toUpperCase(); setDim(axis, (parseFloat(document.getElementById(id).value) || 0) + d); };
+window.stepMove = (axis, dir) => { if (selected) { pushUndo(); selected.position[axis] += dir * toMM(parseFloat(document.getElementById('moveStep').value) || 1); syncUI(); } };
+window.stepRot = (axis, dir) => { if (!selected) return; pushUndo(); const deg = (parseFloat(document.getElementById('rotStep').value) || 15) * dir; const ax = axis === 'x' ? new THREE.Vector3(1,0,0) : axis === 'y' ? new THREE.Vector3(0,1,0) : new THREE.Vector3(0,0,1); if (!selected.userData.rotDeg) selected.userData.rotDeg = { x: 0, y: 0, z: 0 }; const wasG = autoBedHug || isOnBed(selected); selected.rotateOnWorldAxis(ax, THREE.MathUtils.degToRad(deg)); selected.userData.rotDeg[axis] = (((selected.userData.rotDeg[axis] + deg) % 360) + 360) % 360; if (wasG) snapBottomToBed(selected); else if (autoBedHug || isOnBed(selected)) snapBottomToBed(selected); else clampAboveBed(selected); syncUI(); };
+window.dropToBed = () => { if (!selected) return; snapBottomToBed(selected); syncUI(); return;
+  if (!selected) return;
+  selected.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(selected);
+  if (isFinite(b.min.y)) {
+    selected.position.y -= b.min.y;
+    selected.updateMatrixWorld(true);
+  }
+  if (selected.userData && selected.userData.params) selected.userData.params.pz = 0;
+  syncUI();
+};
+window.centerSelected = () => { if (selected) { selected.position.x = 0; selected.position.z = 0; dropToBed(); } };
+window.toggleWireframe = () => { if (selected) selected.material.wireframe = !selected.material.wireframe; };
+window.toggleHole = () => { if (!selected) return; pushUndo(); selected.userData.isHole = !selected.userData.isHole; if (selected.userData.isHole) { selected.userData.origColor = selected.material.color.getHex(); selected.material.color.setHex(0x94a3b8); } else { selected.material.color.setHex(selected.userData.origColor || 0x3b82f6); } selected.material.depthWrite = !selected.userData.isHole; selected.material.transparent = selected.userData.isHole; selected.material.opacity = selected.userData.isHole ? 0.52 : 1.0; selectMesh(selected); };
+window.flip180 = () => { if (!selected) return; if (!selected.userData.rotDeg) selected.userData.rotDeg = { x: 0, y: 0, z: 0 }; selected.rotateOnWorldAxis(new THREE.Vector3(1,0,0), Math.PI); selected.userData.rotDeg.x = (selected.userData.rotDeg.x + 180) % 360; dropToBed(); };
+window.alignSelected = () => { const list = multiSel.length > 1 ? multiSel : parts; if (list.length < 2) return alert('Select 2+ shapes to Align!'); const ref = list.at(-1); list.forEach(m => { m.position.x = ref.position.x; m.position.z = ref.position.z; }); syncUI(); };
+window.mirrorSelected = () => { if (!selected) return; selected.scale.x *= -1; syncUI(); };
+window.arrayLinear = () => { if (!selected) return; for (let i = 1; i <= 2; i++) { duplicateSelected(); selected.position.x += 5; } syncUI(); };
+window.arrayRadial = () => { if (!selected) return; const base = selected, r = Math.max(30, Math.hypot(base.position.x, base.position.z)); for (let i = 1; i < 6; i++) { const a = (i * Math.PI * 2) / 6; selectMesh(base); duplicateSelected(); selected.position.set(Math.cos(a)*r, base.position.y, Math.sin(a)*r); selected.rotation.y = -a; } syncUI(); };
+window.toggleHide = () => { if (!selected) return; selected.visible = !selected.visible; syncUI(); };
+window.loadDemo = (kind) => {
+  parts.forEach(m => scene.remove(m)); parts = []; multiSel = []; selected = null;
+  const spawn = (type, params, x, z, isMotor) => {
+    count++;
+    const m = new THREE.Mesh(buildGeo(type, params), makeCadMat(PALETTE[(count - 1) % PALETTE.length]));
+    styleMesh(m);
+    m.userData = { name: (isMotor ? '⚡ ' : '') + `${type.toUpperCase()} ${count}`, type, params, isHole: false, isMotor: !!isMotor };
+    m.position.set(x, params.z / 2, z);
+    scene.add(m); parts.push(m); return m;
+  };
+  if (kind === 'gears') {
+    const sh = spawn('dshaft', { x: 8, y: 8, z: 24, rad: 4, holeR: 0, teeth: 16 }, -35, 0, true);
+    const g1 = spawn('gear', { x: 26, y: 26, z: 12, rad: 13, holeR: 4.2, teeth: 12 }, -35, 0, false);
+    const g2 = spawn('gear', { x: 46, y: 46, z: 12, rad: 23, holeR: 6, teeth: 22 }, -35 + (13 + 23) * 0.91, 0, false);
+    const g3 = spawn('gear', { x: 62, y: 62, z: 12, rad: 31, holeR: 8, teeth: 30 }, -35 + (13 + 23) * 0.91 + (23 + 31) * 0.91, 0, false);
+    selectMesh(g1);
+  } else if (kind === 'battgear') {
+    const bp = { ...BATT_SPECS.b18650 };
+    const bm = new THREE.Mesh(buildGeo('b18650', bp), makeBatteryMat('b18650')); styleMesh(bm); addBatteryTerminals(bm, 'b18650', bp);
+    bm.userData = { name: '18650 (3.7V)', type: 'b18650', params: bp, isHole: false, volts: 3.7 };
+    bm.position.set(-55, bp.z / 2, 0); scene.add(bm); parts.push(bm); dropToBed();
+    const mot = spawn('motor', { x: 28, y: 28, z: 36, rad: 14, holeR: 4, teeth: 16 }, -15, 0, true);
+    const g1 = spawn('gear', { x: 30, y: 30, z: 10, rad: 15, holeR: 4.2, teeth: 14 }, -15, 0, false); g1.position.y = 28;
+    const g2 = spawn('gear', { x: 50, y: 50, z: 10, rad: 25, holeR: 6, teeth: 24 }, -15 + (15 + 25) * 0.91, 0, false); g2.position.y = 28;
+    
+    selectMesh(g1);
+  } else if (kind === 'bearing') {
+    const sh = spawn('dshaft', { x: 15, y: 15, z: 26, rad: 7.5, holeR: 0, teeth: 16 }, 0, 0, true);
+    const b1 = spawn('bearing', { x: 46, y: 46, z: 12, rad: 23, holeR: 8, teeth: 16 }, 0, 0, false);
+    selectMesh(b1);
+  }
+  saveSimSnapshot();
+  if (!simRunning) toggleSim();
+  document.getElementById('simBtn2')?.classList.toggle('sim-on', simRunning);
+};
+window.clearScene = () => { pool.forEach(m => scene.remove(m)); parts = parts.filter(m => !pool.includes(m)); multiSel = []; selectMesh(null); };
+let undoStack = [];
+function pushUndo() {
+  const snap = parts.map(m => ({
+    geo: m.geometry.clone(),
+    mat: m.material.clone(),
+    pos: m.position.clone(),
+    rot: m.rotation.clone(),
+    scl: m.scale.clone(),
+    vis: m.visible,
+    ud: JSON.parse(JSON.stringify({ ...m.userData, childrenBackup: null }))
+  }));
+  undoStack.push(snap);
+  if (undoStack.length > 25) undoStack.shift();
+}
+window.undoAction = () => {
+  if (!undoStack.length) return alert('Nothing left to undo!');
+  const snap = undoStack.pop();
+  parts.forEach(m => scene.remove(m));
+  parts = []; multiSel = []; selected = null;
+  snap.forEach(s => {
+    const m = new THREE.Mesh(s.geo, s.mat);
+    m.position.copy(s.pos); m.rotation.copy(s.rot); m.scale.copy(s.scl);
+    m.visible = s.vis; m.userData = s.ud;
+    styleMesh(m); scene.add(m); parts.push(m);
+  });
+  selectMesh(parts.at(-1) || null);
+};
+window.paintPart = (hex) => {
+  const targets = (typeof multiSel !== 'undefined' && multiSel.length) ? multiSel : (selected ? [selected] : []);
+  const css = '#' + hex.toString(16).padStart(6, '0');
+  targets.forEach(m => {
+    if (m.userData.isHole) return;
+    if (m.userData.volts && typeof BATT_SPECS !== 'undefined' && BATT_SPECS[m.userData.type]) {
+      m.material = makeBatteryMat(m.userData.type, css);
+    } else {
+      m.material.color.setHex(hex);
+    }
+  });
+};
+window.duplicateSelected = () => { if (!selected) return; count++; const c = selected.clone(); c.geometry = selected.geometry.clone(); c.material = selected.material.clone(); c.userData = JSON.parse(JSON.stringify(selected.userData)); c.userData.name += ' Copy'; c.position.x += 25; scene.add(c); parts.push(c); selectMesh(c); };
+window.deleteSelected = () => { pushUndo(); const targets = multiSel.length ? [...multiSel] : (selected ? [selected] : []); if (!targets.length) return; targets.forEach(m => scene.remove(m)); parts = parts.filter(x => !targets.includes(x)); multiSel = []; selectMesh(parts.at(-1) || null); };
+window.bridgeParts = () => { const a = prevSelected || parts.at(-2), b = selected || parts.at(-1); if (!a || !b || a === b) return alert('Tap 2 shapes first, then tap Bridge!'); const p1 = a.position.clone(), p2 = b.position.clone(), dir1 = new THREE.Vector3(0,1,0).applyQuaternion(a.quaternion), dir2 = new THREE.Vector3(0,1,0).applyQuaternion(b.quaternion), dist = p1.distanceTo(p2)*0.45, curve = new THREE.CatmullRomCurve3([p1, p1.clone().addScaledVector(dir1,dist), p2.clone().addScaledVector(dir2,dist), p2]), r = Math.min(a.userData.params.rad||10, b.userData.params.rad||10); count++; const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, r, 32, false), new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.35 })); m.userData = { name: `BRIDGE ${count}`, type: 'bridge', params: { rad: r }, isHole: false }; m.userData.grounded = true; scene.add(m); parts.push(m); selectMesh(m); dropToBed(); };
+let physRunning = false, simBackup = [];
+function saveSimSnapshot() {
+  simBackup = parts.map(m => ({ m, pos: m.position.clone(), rot: m.rotation.clone(), quat: m.quaternion.clone() }));
+}
+window.resetSimState = () => {
+  physRunning = false; simRunning = false;
+  document.getElementById('physBtn').classList.remove('sim-on');
+  document.getElementById('simBtn').classList.remove('sim-on');
+  document.getElementById('simBtn').textContent = '▶️ Sim Gears';
+  simBackup.forEach(s => { if (parts.includes(s.m)) { s.m.position.copy(s.pos); s.m.quaternion.copy(s.quat); s.m.userData.vy = 0; } });
+  syncUI();
+};
+window.togglePhysics = () => {
+  if (!physRunning && !simRunning) saveSimSnapshot();
+  physRunning = !physRunning;
+  document.getElementById('physBtn').classList.toggle('sim-on', physRunning);
+  if (physRunning) parts.forEach(m => { m.userData.vy = 0; });
+};
+window.setMotorPart = window.setMotorGear = () => {
+  if (!selected) return alert('Select any part first!');
+  selected.userData.isMotor = !selected.userData.isMotor;
+  selected.userData.name = selected.userData.isMotor ? '⚡ ' + selected.userData.name.replace(/^⚡ /, '') : selected.userData.name.replace(/^⚡ /, '');
+  syncUI();
+};
+window.linkGears = () => {
+  const a = prevSelected, b = selected;
+  if (!a || !b || a === b || a.userData.type !== 'gear' || b.userData.type !== 'gear') return alert('Tap Driver Gear first, then Driven Gear, then tap Link!');
+  b.userData.driverId = a.uuid;
+  if (!parts.some(g => g.userData.type === 'gear' && g.userData.isMotor)) { a.userData.isMotor = true; a.userData.name = '⚡ ' + a.userData.name.replace(/^⚡ /, ''); }
+  alert(`🔗 Linked ${a.userData.name} ➔ ${b.userData.name}`);
+  syncUI();
+};
+window.toggleSim =  () => { if (!simRunning && !physRunning) saveSimSnapshot(); simRunning = !simRunning; document.getElementById('simBtn').classList.toggle('sim-on', simRunning); document.getElementById('simBtn').textContent = simRunning ? '⏸️ Stop Sim' : '▶️ Sim Gears'; };
+function prepCsgGeo(mesh) {
+  let g = mesh.geometry.clone();
+  g.applyMatrix4(mesh.matrixWorld);
+  if (g.index) g = g.toNonIndexed();
+  g.deleteAttribute('uv');
+  g.computeVertexNormals();
+  return g;
+}
+window.groupSelected = async () => {
+  const pool = multiSel.length > 1 ? [...multiSel] : [...parts];
+  if (pool.length < 2) return alert('Select or add at least 2 parts to Group!');
+  const solids = pool.filter(m => !m.userData.isHole), holes = pool.filter(m => m.userData.isHole);
+  if (!solids.length) return alert('Need at least 1 Solid part!'); pushUndo();
+  const bks = pool.map(m => ({ geo: m.geometry.clone(), mat: m.material.clone(), pos: m.position.clone(), rot: m.rotation.clone(), scl: m.scale.clone(), ud: JSON.parse(JSON.stringify(m.userData)) }));
+  pool.forEach(m => m.updateMatrixWorld(true));
+  let finalGeo = null;
+  try {
+    const { Brush, Evaluator, SUBTRACTION, ADDITION } = await import('./vendor/three-bvh-csg.js');
+    const evalr = new Evaluator(); evalr.attributes = ['position', 'normal'];
+    let res = new Brush(prepCsgGeo(solids.at(0))); res.updateMatrixWorld();
+    for (let i = 1; i < solids.length; i++) { const b = new Brush(prepCsgGeo(solids.at(i))); b.updateMatrixWorld(); res = evalr.evaluate(res, b, ADDITION); }
+    for (const h of holes) { const hg = prepCsgGeo(h); hg.scale(1, 1.01, 1); const hb = new Brush(hg); hb.updateMatrixWorld(); res = evalr.evaluate(res, hb, SUBTRACTION); }
+    finalGeo = res.geometry;
+  } catch (err) {
+    const posArr = [];
+    solids.forEach(m => { const g = prepCsgGeo(m), a = g.attributes.position.array; for (let i = 0; i < a.length; i++) posArr.push(a[i]); });
+    finalGeo = new THREE.BufferGeometry();
+    finalGeo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+    finalGeo.computeVertexNormals();
+  }
+  finalGeo.computeBoundingBox(); const c = new THREE.Vector3(); finalGeo.boundingBox.getCenter(c);
+  finalGeo.translate(-c.x, -c.y, -c.z);
+  pool.forEach(m => scene.remove(m)); parts = parts.filter(m => !pool.includes(m)); multiSel = []; count++;
+  const merged = new THREE.Mesh(finalGeo, makeCadMat(solids.at(0).material.color.getHex()));
+  merged.position.copy(c);
+  merged.userData = { name: `PART ${count}`, type: 'grouped', params: { rad: 0 }, isHole: false, childrenBackup: bks };
+  styleMesh(merged);
+  scene.add(merged); parts.push(merged); selectMesh(merged); dropToBed();
+};
+window.ungroupSelected = () => { if (!selected?.userData.childrenBackup) return alert('Select a Grouped part!'); const bks = selected.userData.childrenBackup; scene.remove(selected); parts = parts.filter(x => x !== selected); bks.forEach(b => { const m = new THREE.Mesh(b.geo, b.mat); m.position.copy(b.pos); m.rotation.copy(b.rot); m.scale.copy(b.scl); m.userData = b.ud; scene.add(m); parts.push(m); }); selectMesh(parts.at(-1)); };
+window.planeCutSelected = () => {
+  if (!selected) return alert('Select a shape or imported STL to Cut in Half!');
+  selected.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(selected), sz = new THREE.Vector3(), c = new THREE.Vector3();
+  b.getSize(sz); b.getCenter(c);
+  const cutH = sz.y * 0.5 + 2;
+  const hm = new THREE.Mesh(new THREE.BoxGeometry(sz.x + 10, cutH, sz.z + 10), makeCadMat(0x94a3b8));
+  hm.material.transparent = true; hm.material.opacity = 0.52;
+  hm.userData = { name: 'Plane Cut', type: 'box', params: { x: sz.x+10, y: sz.z+10, z: cutH, rad: 0 }, isHole: true };
+  hm.position.set(c.x, b.min.y + sz.y * 0.5 + cutH * 0.5, c.z);
+  scene.add(hm); parts.push(hm); multiSel = [selected, hm]; groupSelected();
+};
+window.throughHollowSelected = () => {
+  if (!selected) return alert('Select a Box, Cylinder, or Prism!');
+  const t = selected.userData.type, p = selected.userData.params;
+  const wall = Math.max(0.4, parseFloat(document.getElementById('shellWall').value) || 2);
+  if (!['box','cyl','poly'].includes(t)) return alert('Select a Box, Cylinder, or Prism!');
+  const hp = t === 'box'
+    ? { x: Math.max(1, p.x - wall*2), y: Math.max(1, p.y - wall*2), z: p.z + 4, rad: 0 }
+    : { x: Math.max(1, (p.rad*2) - wall*2), y: Math.max(1, (p.rad*2) - wall*2), z: p.z + 4, rad: Math.max(0.5, p.rad - wall), holeR: 0, teeth: p.teeth || 6 };
+  const hm = new THREE.Mesh(buildGeo(t, hp), makeCadMat(0x94a3b8));
+  hm.material.transparent = true; hm.material.opacity = 0.52;
+  hm.userData = { name: 'Through Cut', type: t, params: hp, isHole: true };
+  hm.position.copy(selected.position); hm.rotation.copy(selected.rotation);
+  scene.add(hm); parts.push(hm); multiSel = [selected, hm]; groupSelected();
+};
+window.hollowSelected = () => {
+  if (!selected) return alert('Select a Box, Cylinder, or Prism to Shell!');
+  const t = selected.userData.type, p = selected.userData.params;
+  const wall = Math.max(0.4, toMM(parseFloat(document.getElementById('shellWall').value) || 2));
+  if (!['box','cyl','poly'].includes(t)) return alert('Select a Box, Cylinder, or Prism to Shell!');
+  const hp = t === 'box'
+    ? { x: Math.max(1, p.x - wall*2), y: Math.max(1, p.y - wall*2), z: p.z, rad: 0 }
+    : { x: Math.max(1, (p.rad*2) - wall*2), y: Math.max(1, (p.rad*2) - wall*2), z: p.z, rad: Math.max(0.5, p.rad - wall), holeR: 0, teeth: p.teeth || 6 };
+  const hm = new THREE.Mesh(buildGeo(t, hp), makeCadMat(0x94a3b8));
+  hm.material.transparent = true; hm.material.opacity = 0.52;
+  hm.userData = { name: 'Shell Cut', type: t, params: hp, isHole: true };
+  hm.position.set(selected.position.x, selected.position.y + wall, selected.position.z);
+  hm.rotation.copy(selected.rotation);
+  scene.add(hm); parts.push(hm); multiSel = [selected, hm]; groupSelected();
+};
+let dragMode = 'move', draggingPart = false, lastTapTime = 0, lastTapObj = null, tapCount = 0;
+let dragPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0), dragStartPt = new THREE.Vector3(), objStartPos = new THREE.Vector3(), rotStartX = 0, rotAcc = 0, downPos = { x: 0, y: 0, empty: false };
+let autoBedHug = false;
+window.toggleAutoBed = () => {
+  autoBedHug = !autoBedHug;
+  const b = document.getElementById('autoBedBtn');
+  b.style.color = autoBedHug ? '#00ff87' : '#94a3b8';
+  b.style.borderColor = autoBedHug ? '#00ff87' : '#2b3648';
+  if (autoBedHug && selected) { snapBottomToBed(selected); syncUI(); }
+};
+function trueMinY(m) {
+  m.updateMatrixWorld(true);
+  const pos = m.geometry && m.geometry.attributes.position;
+  if (!pos) return new THREE.Box3().setFromObject(m).min.y;
+  let minY = Infinity; const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+    if (v.y < minY) minY = v.y;
+  }
+  return minY === Infinity ? 0 : minY;
+}
+function snapBottomToBed(m) {
+  m.position.y -= trueMinY(m);
+  m.userData.lifted = false;
+}
+function isOnBed(m) {
+  return !m.userData.lifted;
+}
+window.setGizmoMode = (mode) => {
+  if (!selected) return alert('Select a shape first!');
+  dragMode = mode;
+  tapCount = mode === 'size' ? 1 : mode === 'rotate' ? 2 : 0;
+  ['Move','Size','Rot'].forEach(k => { const el = document.getElementById('mBtn'+k); const on = (k==='Move'&&dragMode==='move')||(k==='Size'&&dragMode==='size')||(k==='Rot'&&dragMode==='rotate'); if (el) { el.style.color = on ? '#00ff87' : '#e2e8f0'; el.style.background = on ? 'rgba(0,255,135,0.14)' : 'transparent'; } });
+  syncUI();
+};
+window.cycleGizmoMode = () => {
+  if (!selected) return alert('Select a shape first!');
+  tapCount = (tapCount + 1) % 3;
+  dragMode = tapCount === 0 ? 'move' : tapCount === 1 ? 'size' : 'rotate';
+  syncUI();
+};
+window.toggleRotMode = () => {
+  if (!selected) return alert('Select a shape first!');
+  dragMode = dragMode === 'rotate' ? 'move' : 'rotate';
+  tapCount = dragMode === 'rotate' ? 2 : 0;
+  syncUI();
+};
+window.toggleSizeMode = () => {
+  if (!selected) return alert('Select a shape first!');
+  dragMode = dragMode === 'size' ? 'move' : 'size';
+  tapCount = dragMode === 'size' ? 1 : 0;
+  syncUI();
+};
+const STEP_LIST = [0.5, 1, 2, 5, 10];
+window.cycleStep = () => {
+  const inp = document.getElementById('moveStep');
+  const cur = parseFloat(inp.value) || 1;
+  const nxt = STEP_LIST[(STEP_LIST.indexOf(cur) + 1) % STEP_LIST.length];
+  inp.value = nxt;
+  document.getElementById('quickStepBtn').textContent = `${nxt}mm`;
+};
+let moveLockBtnMode = false;
+window.toggleMoveLock = () => {
+  if (!selected && !moveLockBtnMode) return alert('Select a shape first!');
+  moveLockBtnMode = !moveLockBtnMode; if (!moveLockBtnMode) dragMode = 'move';
+  const b = document.getElementById('moveShapeBtn');
+  b.classList.toggle('blue', moveLockBtnMode);
+  b.textContent = moveLockBtnMode ? '🔒 Done' : '✥ Move';
+  orbit.enabled = !moveLockBtnMode;
+  syncUI();
+};
+function hitPart(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - r.left)/r.width)*2 - 1; pointer.y = -((e.clientY - r.top)/r.height)*2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(parts, false);
+  return hits.length ? hits.at(0).object : null;
+}
+renderer.domElement.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) return;
+  const t = e.touches[0];
+  if (boxSelectMode || moveLockBtnMode || draggingPart || hitPart(t)) { e.preventDefault(); }
+}, { passive: false, capture: true });
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (moveLockBtnMode && selected) {
+    e.stopImmediatePropagation();
+    const nowL = Date.now(), hitL = hitPart(e);
+    if (hitL === selected && (nowL - lastTapTime) < 550) {
+      dragMode = dragMode === 'rotate' ? 'move' : 'rotate';
+      syncUI();
+    }
+    lastTapTime = nowL;
+    const r = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((e.clientX - r.left)/r.width)*2 - 1; pointer.y = -((e.clientY - r.top)/r.height)*2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    if (dragMode === 'rotate' && rotRings.length) {
+      const rHits = raycaster.intersectObjects(rotRings, false);
+      if (rHits.length > 0) activeRotAxis = rHits.at(0).object.userData.rotAxis;
+      const c3 = new THREE.Vector3(); new THREE.Box3().setFromObject(selected).getCenter(c3); c3.project(camera);
+      rotStartX = Math.atan2(e.clientY - r.top - (-c3.y*0.5+0.5)*container.clientHeight, e.clientX - r.left - (c3.x*0.5+0.5)*container.clientWidth);
+      draggingPart = true; orbit.enabled = false; syncUI(); return;
+    }
+    pointer.x = ((e.clientX - r.left)/r.width)*2 - 1; pointer.y = -((e.clientY - r.top)/r.height)*2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    draggingPart = true; orbit.enabled = false;
+    dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0,1,0), selected.position);
+    raycaster.ray.intersectPlane(dragPlane, dragStartPt); objStartPos.copy(selected.position); window.multiStart = (multiSel.length ? multiSel : [selected]).map(m => ({ m, pos: m.position.clone() }));
+    return;
+  }
+  if (boxSelectMode) {
+    const r = container.getBoundingClientRect();
+    boxStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+    const sr = document.getElementById('selRect');
+    sr.style.left = boxStart.x + 'px'; sr.style.top = boxStart.y + 'px'; sr.style.width = '0px'; sr.style.height = '0px'; sr.style.display = 'block';
+    return;
+  }
+  const r = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - r.left)/r.width)*2 - 1; pointer.y = -((e.clientY - r.top)/r.height)*2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+    if (dragMode === 'move' && selected && moveHandles.length) {
+    const mHits = raycaster.intersectObjects(moveHandles, false);
+    if (mHits.length > 0) {
+      e.stopImmediatePropagation();
+      const nowG = Date.now(), axHit = mHits.at(0).object.userData.moveAxis;
+      if (axHit === 'xz') {
+        window.puckTapStart = { x: e.clientX, y: e.clientY, t: nowG };
+      }
+      lastTapTime = nowG; lastTapObj = selected; pushUndo();
+      activeMoveAxis = axHit;
+      draggingPart = true; orbit.enabled = false;
+      const nrm = activeMoveAxis === 'y' ? camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize() : new THREE.Vector3(0,1,0);
+      dragPlane.setFromNormalAndCoplanarPoint(nrm.lengthSq() > 0.01 ? nrm : new THREE.Vector3(0,0,1), selected.position);
+      raycaster.ray.intersectPlane(dragPlane, dragStartPt); objStartPos.copy(selected.position); window.multiStart = (multiSel.length ? multiSel : [selected]).map(m => ({ m, pos: m.position.clone() }));
+      return;
+    }
+  }
+  if (dragMode === 'rotate' && selected && rotRings.length) {
+    const rHits = raycaster.intersectObjects(rotRings, false);
+    if (rHits.length > 0) {
+      activeRotAxis = rHits.at(0).object.userData.rotAxis; if (!selected.userData.rotDeg) selected.userData.rotDeg = { x: 0, y: 0, z: 0 };
+      const c3 = new THREE.Vector3(); new THREE.Box3().setFromObject(selected).getCenter(c3); c3.project(camera);
+      const cx = (c3.x * 0.5 + 0.5) * container.clientWidth, cy = (-c3.y * 0.5 + 0.5) * container.clientHeight;
+      rotStartX = Math.atan2(e.clientY - r.top - cy, e.clientX - r.left - cx);
+      draggingPart = true; orbit.enabled = false; syncUI(); return;
+    }
+  }
+  const hit = hitPart(e);
+  if (!hit) { downPos = { x: e.clientX, y: e.clientY, empty: true }; orbit.enabled = true; return; }
+  e.stopImmediatePropagation(); try { renderer.domElement.setPointerCapture(e.pointerId); } catch(_){} downPos = { x: e.clientX, y: e.clientY, empty: false };
+  const now = Date.now();
+  /* mode controlled solely by Move | Size | Rot top buttons */
+  lastTapTime = now; lastTapObj = hit; selectMesh(hit);
+  pushUndo(); draggingPart = true; orbit.enabled = false;
+  dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0,1,0), hit.position);
+  raycaster.ray.intersectPlane(dragPlane, dragStartPt); objStartPos.copy(hit.position); rotStartX = e.clientX; rotAcc = 0;
+}, true);
+renderer.domElement.addEventListener('pointermove', e => {
+  if (boxSelectMode && boxStart) {
+    const r = container.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top, sr = document.getElementById('selRect');
+    sr.style.left = Math.min(boxStart.x, cx) + 'px'; sr.style.top = Math.min(boxStart.y, cy) + 'px';
+    sr.style.width = Math.abs(cx - boxStart.x) + 'px'; sr.style.height = Math.abs(cy - boxStart.y) + 'px';
+    return;
+  }
+  if (!draggingPart || !selected) return;
+  e.stopImmediatePropagation();
+  if (dragMode !== 'rotate') {
+    const r = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((e.clientX - r.left)/r.width)*2 - 1; pointer.y = -((e.clientY - r.top)/r.height)*2 + 1;
+    raycaster.setFromCamera(pointer, camera); const curPt = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(dragPlane, curPt)) {
+      const st = parseFloat(document.getElementById('moveStep').value) || 1;
+      const dx = (activeMoveAxis === 'x' || activeMoveAxis === 'xz') ? Math.round((curPt.x - dragStartPt.x)/st)*st : 0;
+      const dz = (activeMoveAxis === 'z' || activeMoveAxis === 'xz') ? Math.round((curPt.z - dragStartPt.z)/st)*st : 0;
+      const dy = (activeMoveAxis === 'y') ? Math.round((curPt.y - dragStartPt.y)/st)*st : 0;
+      (window.multiStart || [{ m: selected, pos: objStartPos }]).forEach(item => {
+        item.m.position.set(item.pos.x + dx, item.pos.y + dy, item.pos.z + dz);
+        if (autoBedHug) { item.m.userData.lifted = false; clampAboveBed(item.m); } else if (dy !== 0) { item.m.updateMatrixWorld(true); item.m.userData.lifted = new THREE.Box3().setFromObject(item.m).min.y > 0.25; clampAboveBed(item.m); }
+      });
+      syncUI();
+    }
+  } else {
+    const r = renderer.domElement.getBoundingClientRect(), c3 = new THREE.Vector3();
+    new THREE.Box3().setFromObject(selected).getCenter(c3); c3.project(camera);
+    const cx = (c3.x*0.5+0.5)*container.clientWidth, cy = (-c3.y*0.5+0.5)*container.clientHeight;
+    const curAng = Math.atan2(e.clientY - r.top - cy, e.clientX - r.left - cx);
+    let diffDeg = -THREE.MathUtils.radToDeg(curAng - rotStartX);
+    if (diffDeg > 180) diffDeg -= 360; if (diffDeg < -180) diffDeg += 360;
+    const degStep = parseFloat(document.getElementById('rotStep').value) || 5;
+    const snapped = Math.round(diffDeg / degStep) * degStep;
+    if (snapped !== 0) {
+      if (!selected.userData.rotDeg) selected.userData.rotDeg = { x: 0, y: 0, z: 0 };
+      const ax = activeRotAxis === 'x' ? new THREE.Vector3(1,0,0) : activeRotAxis === 'y' ? new THREE.Vector3(0,1,0) : new THREE.Vector3(0,0,1);
+      const wasGrounded = autoBedHug || isOnBed(selected); selected.rotateOnWorldAxis(ax, THREE.MathUtils.degToRad(snapped));
+      if (!selected.userData.rotDeg) selected.userData.rotDeg = { x: 0, y: 0, z: 0 }; selected.userData.rotDeg[activeRotAxis] = (((selected.userData.rotDeg[activeRotAxis] + snapped) % 360) + 360) % 360;
+      rotStartX -= THREE.MathUtils.degToRad(snapped);
+      if (autoBedHug || isOnBed(selected)) snapBottomToBed(selected); else clampAboveBed(selected); syncUI();
+    }
+  }
+});
+function finishBoxSelect(clientX, clientY) {
+  if (!boxSelectMode) return;
+  const r = container.getBoundingClientRect();
+  document.getElementById('selRect').style.display = 'none';
+  if (boxStart && clientX != null) selectBoxArea(boxStart.x, boxStart.y, clientX - r.left, clientY - r.top);
+  boxStart = null; boxSelectMode = false;
+  const bsb = document.getElementById('boxSelBtn');
+  bsb.classList.remove('blue'); bsb.textContent = '⬚ Select';
+  orbit.enabled = !moveLockBtnMode;
+}
+window.addEventListener('pointercancel', e => finishBoxSelect(e.clientX, e.clientY), true);
+window.addEventListener('touchend', e => { if (boxSelectMode) { const t = e.changedTouches && e.changedTouches[0]; finishBoxSelect(t ? t.clientX : null, t ? t.clientY : null); } }, true);
+window.addEventListener('pointerup', e => {
+  if (boxSelectMode && boxStart) {
+    const r = container.getBoundingClientRect(), sr = document.getElementById('selRect');
+    sr.style.display = 'none';
+    selectBoxArea(boxStart.x, boxStart.y, e.clientX - r.left, e.clientY - r.top);
+    boxStart = null; toggleBoxSelect(); return;
+  } if (downPos.empty && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 8) { selectMesh(null); tapCount = 0; dragMode = 'move'; } downPos.empty = false; draggingPart = false; orbit.enabled = true; });
+window.loadDemo = (kind) => {
+  parts.forEach(m => scene.remove(m)); parts = []; multiSel = []; selected = null;
+  const spawn = (type, params, x, z, isMotor) => {
+    count++;
+    const m = new THREE.Mesh(buildGeo(type, params), makeCadMat(PALETTE[(count - 1) % PALETTE.length]));
+    styleMesh(m);
+    m.userData = { name: (isMotor ? '⚡ ' : '') + `${type.toUpperCase()} ${count}`, type, params, isHole: false, isMotor: !!isMotor };
+    m.position.set(x, params.z / 2, z);
+    scene.add(m); parts.push(m); return m;
+  };
+  if (kind === 'gears') {
+    const g1 = spawn('gear', { x: 26, y: 26, z: 12, rad: 13, holeR: 4, teeth: 12 }, -35, 0, true);
+    const g2 = spawn('gear', { x: 46, y: 46, z: 12, rad: 23, holeR: 6, teeth: 22 }, -35 + (13 + 23) * 0.91, 0, false);
+    const g3 = spawn('gear', { x: 62, y: 62, z: 12, rad: 31, holeR: 8, teeth: 30 }, -35 + (13 + 23) * 0.91 + (23 + 31) * 0.91, 0, false);
+    selectMesh(g1);
+  } else if (kind === 'pulleys') {
+    const p1 = spawn('pulley', { x: 32, y: 32, z: 12, rad: 16, holeR: 5, teeth: 16 }, -45, 0, true);
+    const p2 = spawn('pulley', { x: 56, y: 56, z: 12, rad: 28, holeR: 7, teeth: 28 }, 45, 0, false);
+    p2.userData.driverId = p1.uuid;
+    selectMesh(p1);
+  } else if (kind === 'bearing') {
+    const sh = spawn('dshaft', { x: 15, y: 15, z: 26, rad: 7.5, holeR: 0, teeth: 16 }, 0, 0, true);
+    const b1 = spawn('bearing', { x: 46, y: 46, z: 12, rad: 23, holeR: 8, teeth: 16 }, 0, 0, false);
+    b1.userData.driverId = sh.uuid;
+    selectMesh(b1);
+  }
+  saveSimSnapshot();
+  if (!simRunning) toggleSim();
+  document.getElementById('simBtn2')?.classList.toggle('sim-on', simRunning);
+};
+window.exportSTL = async (send) => {
+  const solids = parts.filter(m => !m.userData.isHole);
+  if (!solids.length) return alert('Add a solid part first!');
+  const g = new THREE.Group();
+  solids.forEach(m => {
+    m.updateMatrixWorld(true);
+    const geo = m.geometry.clone();
+    geo.applyMatrix4(m.matrixWorld);
+    // Exact Three.js (X, Y-up, Z-depth) -> 3D Slicer (X, Y-depth, Z-up) 1:1 millimeter mapping
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), yUp = pos.getY(i), zDepth = pos.getZ(i);
+      pos.setXYZ(i, x, -zDepth, yUp);
+    }
+    geo.computeVertexNormals();
+    g.add(new THREE.Mesh(geo));
+  });
+  const blob = new Blob([new STLExporter().parse(g, { binary: true })], { type: 'application/octet-stream' });
+  const fn = 'ares_cad_' + Date.now() + '.stl';
+  const fd = new FormData(); fd.append('file', blob, fn);
+  const d = await (await fetch(send ? '/api/cad/send_to_slicer' : '/api/cad/save_download', { method: 'POST', body: fd })).json();
+  alert(d.ok ? (send ? '✅ Sent ' + d.filename + ' to SV07 Slicer!' : '💾 Saved ' + d.filename + ' to Download!') : 'Error: ' + d.error);
+};
+const fitViewport = () => {
+  const w = container.clientWidth, h = container.clientHeight;
+  if (w > 0 && h > 0) { camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false); }
+};
+new ResizeObserver(fitViewport).observe(container);
+window.addEventListener('resize', fitViewport);
+function stepPhysics(dt) {
+  const active = parts.filter(m => m.visible && !m.userData.isHole);
+  active.sort((a, b) => a.position.y - b.position.y);
+  for (const m of active) {
+    m.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(m);
+    let floorY = 0;
+    for (const o of active) {
+      if (o === m) continue;
+      const ob = new THREE.Box3().setFromObject(o);
+      const ovX = Math.min(b.max.x, ob.max.x) - Math.max(b.min.x, ob.min.x);
+      const ovZ = Math.min(b.max.z, ob.max.z) - Math.max(b.min.z, ob.min.z);
+      if (ovX > 0.5 && ovZ > 0.5 && ob.max.y <= b.min.y + 2.5) floorY = Math.max(floorY, ob.max.y);
+    }
+    if (b.min.y > floorY + 0.05) { m.userData.vy = (m.userData.vy || 0) - 980 * dt; m.position.y += m.userData.vy * dt; }
+    m.updateMatrixWorld(true);
+    const nb = new THREE.Box3().setFromObject(m);
+    if (nb.min.y < floorY) { m.position.y += (floorY - nb.min.y); m.userData.vy = 0; }
+  }
+  if (selBox) selBox.children.forEach(h => h.update());
+}
+function stepGears(dt, now) {
+  const rotables = parts.filter(m => ['motor','dshaft','cyl','hex','bolt','gear','bearing'].includes(m.userData.type) && m.visible);
+  if (!rotables.length) { ['Move','Size','Rot'].forEach(k => { const el = document.getElementById('mBtn'+k); const on = (k==='Move'&&dragMode==='move')||(k==='Size'&&dragMode==='size')||(k==='Rot'&&dragMode==='rotate'); if (el) { el.style.color = on ? '#00ff87' : '#e2e8f0'; el.style.background = on ? 'rgba(0,255,135,0.12)' : 'transparent'; } }); document.getElementById('hudDim').textContent = '⚠️ Add a Motor/Shaft + Gear first!'; return; }
+  const drivers = rotables.filter(m => m.userData.isMotor || m.userData.type === 'motor');
+  const rpm = parseFloat(document.getElementById('motorRpm')?.value) || 30;
+  const vibHz = parseFloat(document.getElementById('simVib')?.value) || 0;
+  const fric = Math.max(0.01, parseFloat(document.getElementById('simFriction')?.value) || 0.15);
+  const trq = parseFloat(document.getElementById('simTorque')?.value) || 25;
+  const pwrMode = 'psu';
+  const totalV = parts.filter(m => m.userData.volts && m.visible).reduce((s, b) => s + (b.userData.volts || 0), 0);
+  const voltScale = pwrMode === 'batt' ? Math.min(1.8, totalV / 3.7) : 1.0;
+  const loadFactor = Math.min(1.8, (trq / (10 + fric * 40)) * voltScale);
+  const baseOmega = ((rpm * Math.PI * 2) / 60) * loadFactor;
+  const omega = new Map(), visited = new Set(), q = [];
+  let statusMsg = (pwrMode === 'batt' && totalV <= 0) ? '🔋 NO BATTERY: Place a 18650 / AA / 9V cell on bed!' : '';
+  if (!drivers.length && !statusMsg) statusMsg = '⚡ NO MOTOR: Select a Motor/Shaft and tap ⚡ Motor!';
+  drivers.forEach(m => { omega.set(m.uuid, baseOmega); visited.add(m.uuid); q.push(m); });
+  while (q.length && !statusMsg) {
+    const g1 = q.shift(), w1 = omega.get(g1.uuid), r1 = (g1.userData.params.rad || 20) * 0.91, t1 = g1.userData.params.teeth || 18;
+    for (const g2 of rotables) {
+      if (g2 === g1) continue;
+      const dist = Math.hypot(g1.position.x - g2.position.x, g1.position.z - g2.position.z);
+      const yGap = Math.abs(g1.position.y - g2.position.y);
+      const coaxial = dist <= Math.max(2.5, (g2.userData.params.holeR || 4) + 1.2) && yGap < 28;
+      if (coaxial && (['motor','dshaft','cyl','hex','bolt'].includes(g1.userData.type) || ['motor','dshaft','cyl','hex','bolt'].includes(g2.userData.type))) {
+        if (!visited.has(g2.uuid)) { omega.set(g2.uuid, w1); visited.add(g2.uuid); q.push(g2); }
+        continue;
+      }
+      if (g2.userData.type !== 'gear' || g1.userData.type !== 'gear') continue;
+      const r2 = (g2.userData.params.rad || 20) * 0.91, t2 = g2.userData.params.teeth || 18, ideal = r1 + r2;
+      if (dist > ideal + 4.5 || yGap > ((g1.userData.params.z + g2.userData.params.z) * 0.5)) continue;
+      if (dist < ideal - 2.3) { statusMsg = `⚠️ JAMMED: ${g1.userData.name} & ${g2.userData.name} too close (${dist.toFixed(1)}/${ideal.toFixed(1)}mm)`; g1.rotation.y += Math.sin(now*0.06)*0.025; g2.rotation.y -= Math.sin(now*0.06)*0.025; continue; }
+      if (dist > ideal + 2.4) { statusMsg = `ℹ️ DISENGAGED: ${g2.userData.name} gap ${(dist - ideal).toFixed(1)}mm`; continue; }
+      if (!visited.has(g2.uuid)) { omega.set(g2.uuid, -w1 * (t1 / t2)); visited.add(g2.uuid); q.push(g2); }
+    }
+  }
+  if (!statusMsg) rotables.forEach(g => { if (omega.has(g.uuid)) { g.rotation.y += omega.get(g.uuid) * dt; if (vibHz > 0) g.position.x += Math.sin(now * 0.00628 * vibHz) * 0.12; } });
+  const rowsEl = document.getElementById('telemRows');
+  if (rowsEl) {
+    if (statusMsg) rowsEl.innerHTML = `<span style="color:#f59e0b;">${statusMsg}</span>`;
+    else {
+      const eff = Math.max(0.45, 1.0 - fric * 0.65);
+      const lines = rotables.filter(g => g.userData.type === 'gear' || g.userData.isMotor).map(g => {
+        if (!omega.has(g.uuid)) return `<div>• ${g.userData.name}: <span style="color:#64748b;">⏸️ Uncoupled (needs shaft in bore)</span></div>`;
+        const wg = omega.get(g.uuid), ratio = Math.abs(baseOmega / wg), gRpm = Math.abs((wg * 60) / (Math.PI * 2));
+        const gTrq = trq * voltScale * ratio * (ratio > 1.05 ? eff : 1);
+        return `<div>• <b>${g.userData.name}</b> | Ratio <b>1:${ratio.toFixed(2)}</b> | <span style="color:#00ff87;">${gRpm.toFixed(1)} RPM</span> (${wg>=0?'CW':'CCW'}) | <span style="color:#fbbf24;">${gTrq.toFixed(1)} N·cm</span></div>`;
+      });
+      rowsEl.innerHTML = lines.join('') + `<div style="margin-top:3px;color:#38bdf8;">Efficiency: ${(eff*100).toFixed(0)}% • Power: ${((trq*voltScale*0.01)*Math.abs(baseOmega)).toFixed(2)} W</div>`;
+    }
+  }
+  ['Move','Size','Rot'].forEach(k => { const el = document.getElementById('mBtn'+k); const on = (k==='Move'&&dragMode==='move')||(k==='Size'&&dragMode==='size')||(k==='Rot'&&dragMode==='rotate'); if (el) { el.style.color = on ? '#00ff87' : '#e2e8f0'; el.style.background = on ? 'rgba(0,255,135,0.12)' : 'transparent'; } }); document.getElementById('hudDim').textContent = statusMsg || `⚙️ DRIVETRAIN ACTIVE • ${visited.size}/${rotables.length} coupled @ ${Math.round(rpm * loadFactor)} RPM`;
+  if (selBox) selBox.children.forEach(h => h.update());
+}
+let lastFrameT = performance.now();
+(function animate(now = performance.now()) {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, (now - lastFrameT) / 1000); lastFrameT = now;
+  if (physRunning) stepPhysics(dt);
+  if (simRunning) stepGears(dt, now);
+  orbit.update(); updatePins(); if (typeof bedGroup !== 'undefined' && bedGroup) {
+    const fromBelow = camera.position.y < -0.5;
+    bedGroup.children.forEach(ch => { if (ch.isMesh) ch.visible = !fromBelow; });
+  }
+  renderer.render(scene, camera);
+})();
+
+let bridgeMode = false, bridgeFirstCap = null, bridgeHighlightMesh = null;
+function clearBridgeHandles() {
+  if (bridgeHighlightMesh) { scene.remove(bridgeHighlightMesh); bridgeHighlightMesh = null; }
+  bridgeFirstCap = null;
+  const bb = document.querySelector('button[onclick="bridgeParts()"]');
+  if (bb) { bb.style.outline = ''; }
+}
+function getClickedFaceCap(hit) {
+  const m = hit.object;
+  m.updateMatrixWorld(true);
+  const nWorld = hit.face.normal.clone().transformDirection(m.matrixWorld).normalize();
+  const ctr = new THREE.Vector3(), sz = new THREE.Vector3();
+  const box = new THREE.Box3().setFromObject(m);
+  box.getCenter(ctr); box.getSize(sz);
+  const t = m.userData?.type || 'box';
+  const roundTypes = ['cyl','cylinder','tube','cone','gear','hexnut','dshaft','wheel','washer','bearing','bolt','motor','18650','21700','aa','aaa','9v'];
+  const q = m.quaternion.clone(), sc = m.scale, prm = m.userData?.params || { x: 40, y: 40, z: 20, rad: 20 };
+
+  if (roundTypes.includes(t)) {
+    // Snap to the closest flat circular end-face along the cylinder's axis
+    const ax = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize();
+    const sign = nWorld.dot(ax) >= 0 ? 1 : -1;
+    const dir = ax.clone().multiplyScalar(sign);
+    const halfH = ((prm.z || 20) * sc.y) * 0.5;
+    const rx = (prm.rad ? prm.rad * 2 : prm.x || 40) * sc.x * 0.5;
+    const rz = (prm.rad ? prm.rad * 2 : prm.y || 40) * sc.z * 0.5;
+    const r = Math.max(2, (rx + rz) * 0.5);
+    return { mesh: m, pt: ctr.clone().addScaledVector(dir, halfH), dir, isRound: true, w: r*2, h: r*2, r };
+  } else {
+    // Snap to the closest dominant world face (+X,-X,+Y,-Y,+Z,-Z) on Box/Prism/Group
+    const axes = [
+      { dir: new THREE.Vector3(1,0,0), dist: sz.x*0.5, w: sz.z, h: sz.y },
+      { dir: new THREE.Vector3(-1,0,0), dist: sz.x*0.5, w: sz.z, h: sz.y },
+      { dir: new THREE.Vector3(0,1,0), dist: sz.y*0.5, w: sz.x, h: sz.z },
+      { dir: new THREE.Vector3(0,-1,0), dist: sz.y*0.5, w: sz.x, h: sz.z },
+      { dir: new THREE.Vector3(0,0,1), dist: sz.z*0.5, w: sz.x, h: sz.y },
+      { dir: new THREE.Vector3(0,0,-1), dist: sz.z*0.5, w: sz.x, h: sz.y }
+    ];
+    let best = axes.at(0), bestDot = -Infinity;
+    for (const f of axes) {
+      const d = nWorld.dot(f.dir);
+      if (d > bestDot) { bestDot = d; best = f; }
+    }
+    return {
+      mesh: m, pt: ctr.clone().addScaledVector(best.dir, best.dist), dir: best.dir.clone(),
+      isRound: false, w: Math.max(2, best.w), h: Math.max(2, best.h), r: Math.min(best.w, best.h)*0.5
+    };
+  }
+}
+function showCapHighlight(cap) {
+  if (bridgeHighlightMesh) { scene.remove(bridgeHighlightMesh); bridgeHighlightMesh = null; }
+  const geo = cap.isRound
+    ? new THREE.CylinderGeometry(cap.r, cap.r, 0.3, 64)
+    : new THREE.BoxGeometry(cap.w, 0.3, cap.h);
+  bridgeHighlightMesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({ color: 0x00ff87, transparent: true, opacity: 0.75, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 })
+  );
+  bridgeHighlightMesh.position.copy(cap.pt).addScaledVector(cap.dir, 0.2);
+  bridgeHighlightMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), cap.dir);
+  scene.add(bridgeHighlightMesh);
+}
+window.bridgeParts = () => {
+  if (parts.length < 2) return alert('Add at least 2 shapes first!');
+  bridgeMode = !bridgeMode;
+  clearBridgeHandles();
+  if (!bridgeMode) return;
+  const bb = document.querySelector('button[onclick="bridgeParts()"]');
+  if (bb) { bb.style.outline = '2px solid #00ff87'; }
+};
+function executeEndBridge(e1, e2) {
+  const d = e1.pt.distanceTo(e2.pt);
+  const customArc = parseFloat(document.getElementById('bridgeArc')?.value) || 0;
+  const span = customArc > 0 ? customArc : Math.max(4, d * 0.55);
+  const segs = Math.max(1, Math.min(64, parseInt(document.getElementById('bridgeSteps')?.value) || 16));
+  const curve = segs === 1
+    ? new THREE.LineCurve3(e1.pt, e2.pt)
+    : new THREE.CubicBezierCurve3(
+        e1.pt.clone(),
+        e1.pt.clone().addScaledVector(e1.dir, span),
+        e2.pt.clone().addScaledVector(e2.dir, span),
+        e2.pt.clone()
+      );
+  const N = 64;
+  const makeFrame = (dir) => {
+    const ref = Math.abs(dir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const u = new THREE.Vector3().crossVectors(ref, dir).normalize();
+    const v = new THREE.Vector3().crossVectors(dir, u).normalize();
+    return { u, v, t: dir.clone().normalize() };
+  };
+  const profilePt = (cap, ang) => {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    if (cap.isRound) return { x: ca * cap.r, y: sa * cap.r };
+    const m = Math.max(Math.abs(ca), Math.abs(sa)) || 1;
+    return { x: (ca / m) * (cap.w * 0.5), y: (sa / m) * (cap.h * 0.5) };
+  };
+  let curFrame = makeFrame(e1.dir);
+  const frames = [curFrame];
+  for (let i = 1; i <= segs; i++) {
+    const t = i / segs;
+    const tan = i === segs ? e2.dir.clone().negate() : curve.getTangent(t).normalize();
+    const qRot = new THREE.Quaternion().setFromUnitVectors(curFrame.t, tan);
+    curFrame = {
+      u: curFrame.u.clone().applyQuaternion(qRot).normalize(),
+      v: curFrame.v.clone().applyQuaternion(qRot).normalize(),
+      t: tan
+    };
+    frames.push(curFrame);
+  }
+  const endFrame = frames[segs];
+  let bestPhase = 0, bestDot = -Infinity;
+  for (let k = 0; k < N; k++) {
+    const ang = (k / N) * Math.PI * 2;
+    const testDir = endFrame.u.clone().multiplyScalar(Math.cos(ang)).addScaledVector(endFrame.v, Math.sin(ang));
+    const ref2 = makeFrame(e2.dir.clone().negate()).u;
+    const dot = testDir.dot(ref2);
+    if (dot > bestDot) { bestDot = dot; bestPhase = ang; }
+  }
+  const rings = [];
+  for (let sIdx = 0; sIdx <= segs; sIdx++) {
+    const t = sIdx / segs;
+    const cPt = curve.getPoint(t);
+    const fr = frames[sIdx];
+    const ring = [];
+    for (let i = 0; i < N; i++) {
+      const a1 = (i / N) * Math.PI * 2;
+      const a2 = a1 - bestPhase * t;
+      const pA = profilePt(e1, a1), pB = profilePt(e2, a2);
+      const lx = pA.x * (1 - t) + pB.x * t;
+      const ly = pA.y * (1 - t) + pB.y * t;
+      ring.push(cPt.clone().addScaledVector(fr.u, lx).addScaledVector(fr.v, ly));
+    }
+    rings.push(ring);
+  }
+  const posArr = [];
+  const pushTri = (a, b, c) => { posArr.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z); };
+  for (let sIdx = 0; sIdx < segs; sIdx++) {
+    const aRing = rings[sIdx], bRing = rings[sIdx + 1];
+    for (let i = 0; i < N; i++) {
+      const ni = (i + 1) % N;
+      pushTri(aRing[i], aRing[ni], bRing[ni]);
+      pushTri(aRing[i], bRing[ni], bRing[i]);
+    }
+  }
+  const rStart = rings.at(0), rEnd = rings.at(segs);
+  for (let i = 1; i < N - 1; i++) {
+    pushTri(rStart, rStart.at(i + 1), rStart.at(i));
+    pushTri(rEnd, rEnd.at(i), rEnd.at(i + 1));
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+  pushUndo(); count++;
+  const m = new THREE.Mesh(geo, makeCadMat(PALETTE[(count - 1) % PALETTE.length]));
+  styleMesh(m);
+  m.userData = { name: `BRIDGE ${count}`, type: 'bridge', params: { rad: Math.min(e1.r, e2.r), z: d }, isHole: false, grounded: true };
+  scene.add(m); parts.push(m); selectMesh(m);
+  bridgeMode = false; clearBridgeHandles();
+}
+window.addEventListener('pointerdown', e => {
+  if (!bridgeMode) return;
+  const rB = renderer.domElement.getBoundingClientRect();
+  if (e.clientX < rB.left || e.clientX > rB.right || e.clientY < rB.top || e.clientY > rB.bottom) return;
+  pointer.x = ((e.clientX - rB.left)/rB.width)*2 - 1;
+  pointer.y = -((e.clientY - rB.top)/rB.height)*2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(parts, false);
+  if (hits.length > 0) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    const cap = getClickedFaceCap(hits.at(0));
+    if (!bridgeFirstCap) {
+      bridgeFirstCap = cap;
+      showCapHighlight(cap);
+    } else if (bridgeFirstCap.mesh === cap.mesh && bridgeFirstCap.dir.dot(cap.dir) > 0.9) {
+      clearBridgeHandles();
+      bridgeMode = true;
+      const bb = document.querySelector('button[onclick="bridgeParts()"]');
+      if (bb) { bb.style.outline = '2px solid #00ff87'; }
+    } else if (bridgeFirstCap.mesh !== cap.mesh) {
+      executeEndBridge(bridgeFirstCap, cap);
+    }
+  }
+}, true);
+const _origUndo = window.undo;
+window.undo = () => { bridgeMode = false; clearBridgeHandles(); if (_origUndo) _origUndo(); };
+const _origClear = window.clearScene;
+window.clearScene = () => { bridgeMode = false; clearBridgeHandles(); if (_origClear) _origClear(); };
+const _origDel = window.deleteSelected;
+window.deleteSelected = () => { bridgeMode = false; clearBridgeHandles(); if (_origDel) _origDel(); };
+
+let alignGuideLines = [];
+function clearAlignGuides() {
+  alignGuideLines.forEach(l => scene.remove(l));
+  alignGuideLines = [];
+}
+function drawAlignGuide(p1, p2, col = 0xf43f5e) {
+  const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: col, depthTest: false }));
+  line.renderOrder = 1010;
+  scene.add(line);
+  alignGuideLines.push(line);
+}
+function applySmartCenterSnap(movingMesh, moveX, moveZ, moveY) {
+  clearAlignGuides();
+  if (!movingMesh || parts.length < 2) return;
+  movingMesh.updateMatrixWorld(true);
+  const bA = new THREE.Box3().setFromObject(movingMesh), cA = new THREE.Vector3();
+  bA.getCenter(cA);
+  const thresh = 1.6;
+  let snappedX = false, snappedZ = false, snappedY = false;
+  for (const other of parts) {
+    if (other === movingMesh || !other.visible) continue;
+    other.updateMatrixWorld(true);
+    const bB = new THREE.Box3().setFromObject(other), cB = new THREE.Vector3();
+    bB.getCenter(cB);
+    if (moveX && !snappedX && Math.abs(cA.x - cB.x) <= thresh) {
+      movingMesh.position.x += (cB.x - cA.x);
+      cA.x = cB.x; snappedX = true;
+      drawAlignGuide(new THREE.Vector3(cB.x, Math.max(0.2, cA.y), Math.min(bA.min.z, bB.min.z) - 25), new THREE.Vector3(cB.x, Math.max(0.2, cA.y), Math.max(bA.max.z, bB.max.z) + 25), 0xf43f5e);
+    }
+    if (moveZ && !snappedZ && Math.abs(cA.z - cB.z) <= thresh) {
+      movingMesh.position.z += (cB.z - cA.z);
+      cA.z = cB.z; snappedZ = true;
+      drawAlignGuide(new THREE.Vector3(Math.min(bA.min.x, bB.min.x) - 25, Math.max(0.2, cA.y), cB.z), new THREE.Vector3(Math.max(bA.max.x, bB.max.x) + 25, Math.max(0.2, cA.y), cB.z), 0x00ff87);
+    }
+    if (moveY && !snappedY && Math.abs(cA.y - cB.y) <= thresh) {
+      movingMesh.position.y += (cB.y - cA.y);
+      cA.y = cB.y; snappedY = true;
+      drawAlignGuide(new THREE.Vector3(cB.x, bB.min.y - 15, cB.z), new THREE.Vector3(cB.x, bB.max.y + 15, cB.z), 0x38bdf8);
+    }
+  }
+}
+window.alignSelected = () => {
+  const target = prevSelected || parts.find(m => m !== selected && m.visible);
+  if (!selected || !target || selected === target) return alert('Tap the outer shape first, then tap the shape you want centered inside it!');
+  pushUndo();
+  target.updateMatrixWorld(true); selected.updateMatrixWorld(true);
+  const cT = new THREE.Vector3(), cS = new THREE.Vector3();
+  new THREE.Box3().setFromObject(target).getCenter(cT);
+  new THREE.Box3().setFromObject(selected).getCenter(cS);
+  selected.position.x += (cT.x - cS.x);
+  selected.position.z += (cT.z - cS.z);
+  clampAboveBed(selected);
+  syncUI();
+  clearAlignGuides();
+  const bT = new THREE.Box3().setFromObject(target);
+  drawAlignGuide(new THREE.Vector3(cT.x, cT.y, bT.min.z - 25), new THREE.Vector3(cT.x, cT.y, bT.max.z + 25), 0xf43f5e);
+  drawAlignGuide(new THREE.Vector3(bT.min.x - 25, cT.y, cT.z), new THREE.Vector3(bT.max.x + 25, cT.y, cT.z), 0x00ff87);
+  setTimeout(clearAlignGuides, 1400);
+};
+
+function serializeSceneData() {
+  return parts.map(m => {
+    m.updateMatrixWorld(true);
+    const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    g.applyMatrix4(m.matrixWorld);
+    const pos = Array.from(g.attributes.position.array);
+    return {
+      name: m.userData?.name || 'PART',
+      type: m.userData?.type || 'box',
+      params: m.userData?.params || {},
+      isHole: !!m.userData?.isHole,
+      lifted: !!m.userData?.lifted,
+      color: m.material?.color ? m.material.color.getHex() : 0x3b82f6,
+      pos
+    };
+  });
+}
+function restoreSceneData(data) {
+  if (!Array.isArray(data)) return;
+  parts.forEach(m => scene.remove(m));
+  parts.length = 0; selected = null; prevSelected = null;
+  data.forEach(item => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(item.pos, 3));
+    const mat = item.isHole ? new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.42 }) : makeCadMat(item.color);
+    const m = new THREE.Mesh(geo, mat);
+    styleMesh(m);
+    m.userData = { name: item.name, type: item.type, params: item.params || {}, isHole: !!item.isHole, lifted: !!item.lifted };
+    scene.add(m); parts.push(m);
+  });
+  if (parts.length) selectMesh(parts.at(-1));
+  syncUI();
+}
+function autoSaveWorkspace() {
+  try { localStorage.setItem('ares_cad_autosave_v1', JSON.stringify(serializeSceneData())); } catch (e) {}
+}
+window.openProjectsModal = () => {
+  renderProjectsList();
+  document.getElementById('projModal').style.display = 'flex';
+};
+function renderProjectsList() {
+  const list = document.getElementById('projList');
+  let db = {};
+  try { db = JSON.parse(localStorage.getItem('ares_cad_projects_v1') || '{}'); } catch (e) {}
+  const keys = Object.keys(db).sort((a, b) => (db[b].ts || 0) - (db[a].ts || 0));
+  if (!keys.length) {
+    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:18px 0;">No saved projects yet. Type a name above and tap Save!</div>';
+    return;
+  }
+  list.innerHTML = keys.map(k => {
+    const item = db[k];
+    const dt = new Date(item.ts || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const safeK = k.replace(/'/g, "\\'");
+    return `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:9px 11px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div><div style="color:#f8fafc;font-weight:600;font-size:13px;">${k}</div><div style="color:#94a3b8;font-size:11px;">${item.data.length} parts • ${dt}</div></div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="loadNamedProject('${safeK}')" style="background:#38bdf8;color:#061019;border:none;border-radius:7px;padding:5px 10px;font-weight:700;font-size:11px;cursor:pointer;">Open</button>
+        <button onclick="deleteNamedProject('${safeK}')" style="background:#ef4444;color:#fff;border:none;border-radius:7px;padding:5px 8px;font-weight:700;font-size:11px;cursor:pointer;">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+window.saveNamedProject = () => {
+  const inp = document.getElementById('projNameInput');
+  const name = (inp.value || '').trim() || ('Project ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  let db = {};
+  try { db = JSON.parse(localStorage.getItem('ares_cad_projects_v1') || '{}'); } catch (e) {}
+  db[name] = { ts: Date.now(), data: serializeSceneData() };
+  localStorage.setItem('ares_cad_projects_v1', JSON.stringify(db));
+  inp.value = '';
+  renderProjectsList();
+};
+window.loadNamedProject = (name) => {
+  let db = {};
+  try { db = JSON.parse(localStorage.getItem('ares_cad_projects_v1') || '{}'); } catch (e) {}
+  if (db[name]) {
+    restoreSceneData(db[name].data);
+    autoSaveWorkspace();
+    document.getElementById('projModal').style.display = 'none';
+  }
+};
+window.deleteNamedProject = (name) => {
+  let db = {};
+  try { db = JSON.parse(localStorage.getItem('ares_cad_projects_v1') || '{}'); } catch (e) {}
+  delete db[name];
+  localStorage.setItem('ares_cad_projects_v1', JSON.stringify(db));
+  renderProjectsList();
+};
+window.newBlankProject = () => {
+  parts.forEach(m => scene.remove(m));
+  parts.length = 0; selected = null; prevSelected = null;
+  autoSaveWorkspace(); syncUI();
+  document.getElementById('projModal').style.display = 'none';
+};
+// Auto-save after every edit & restore automatically if app is closed or refreshed!
+setInterval(autoSaveWorkspace, 2500);
+window.addEventListener('beforeunload', autoSaveWorkspace);
+try {
+  const savedAuto = JSON.parse(localStorage.getItem('ares_cad_autosave_v1') || 'null');
+  if (savedAuto && savedAuto.length) restoreSceneData(savedAuto);
+} catch (e) {}
+
+window._aresSerialize = () => parts.map(m => {
+  m.updateMatrixWorld(true);
+  const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+  g.applyMatrix4(m.matrixWorld);
+  return {
+    name: m.userData?.name || 'PART',
+    type: m.userData?.type || 'box',
+    params: m.userData?.params || {},
+    isHole: !!m.userData?.isHole,
+    lifted: !!m.userData?.lifted,
+    color: m.material?.color ? m.material.color.getHex() : 0x3b82f6,
+    pos: Array.from(g.attributes.position.array)
+  };
+});
+window._aresRestore = (data) => {
+  if (!Array.isArray(data)) return;
+  parts.forEach(m => scene.remove(m));
+  parts.length = 0; selected = null; prevSelected = null;
+  data.forEach(item => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(item.pos, 3));
+    const mat = item.isHole ? new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.42 }) : makeCadMat(item.color);
+    const m = new THREE.Mesh(geo, mat);
+    styleMesh(m);
+    m.userData = { name: item.name, type: item.type, params: item.params || {}, isHole: !!item.isHole, lifted: !!item.lifted };
+    scene.add(m); parts.push(m);
+  });
+  if (parts.length) selectMesh(parts.at(-1));
+  syncUI();
+};
+setInterval(() => { try { localStorage.setItem('ares_cad_autosave_v1', JSON.stringify(window._aresSerialize())); } catch (e) {} }, 2500);
+try {
+  const savedAuto = JSON.parse(localStorage.getItem('ares_cad_autosave_v1') || 'null');
+  if (savedAuto && savedAuto.length) window._aresRestore(savedAuto);
+} catch (e) {}
+
+window._aresSerialize = () => parts.map(m => {
+  m.updateMatrixWorld(true);
+  const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+  g.applyMatrix4(m.matrixWorld);
+  const u8 = new Uint8Array(g.attributes.position.array.buffer);
+  const ch = new Array(u8.length);
+  for (let i = 0; i < u8.length; i++) ch[i] = String.fromCharCode(u8[i]);
+  return {
+    name: m.userData?.name || 'PART',
+    type: m.userData?.type || 'box',
+    params: m.userData?.params || {},
+    isHole: !!m.userData?.isHole,
+    lifted: !!m.userData?.lifted,
+    color: m.material?.color ? m.material.color.getHex() : 0x3b82f6,
+    posB64: btoa(ch.join(''))
+  };
+});
+window._aresRestore = (data) => {
+  if (!Array.isArray(data)) return;
+  parts.forEach(m => scene.remove(m));
+  parts.length = 0; selected = null; prevSelected = null;
+  data.forEach(item => {
+    const bin = atob(item.posB64 || '');
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const arr = new Float32Array(u8.buffer);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    const mat = item.isHole ? new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.42 }) : makeCadMat(item.color);
+    const m = new THREE.Mesh(geo, mat);
+    styleMesh(m);
+    m.userData = { name: item.name, type: item.type, params: item.params || {}, isHole: !!item.isHole, lifted: !!item.lifted };
+    scene.add(m); parts.push(m);
+  });
+  if (parts.length) selectMesh(parts.at(-1));
+  syncUI();
+};
+</script>
+<div id="projModal" style="display:none;position:fixed;inset:0;background:rgba(6,10,18,0.88);z-index:99999;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);">
+  <div style="background:#0f172a;border:1px solid #334155;border-radius:14px;width:100%;max-width:420px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="padding:12px 14px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <strong style="color:#38bdf8;font-size:14px;">📁 My Saved Projects (Offline)</strong>
+      <button type="button" onclick="document.getElementById('projModal').style.display='none'" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:10px 14px;display:flex;gap:6px;border-bottom:1px solid #1e293b;">
+      <input id="projNameInput" placeholder="Project name..." style="flex:1;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:7px 10px;color:#fff;font-size:12px;">
+      <button type="button" id="projSaveBtn" style="background:#00ff87;color:#061019;border:none;border-radius:8px;padding:7px 12px;font-weight:700;font-size:12px;cursor:pointer;">Save</button>
+      <button type="button" id="projNewBtn" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:7px 10px;font-size:12px;cursor:pointer;">+ New</button>
+    </div>
+    <div id="projList" style="padding:10px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
+  </div>
+</div>
+<script>
+window.renderProjectsList = async function() {
+  const list = document.getElementById('projList');
+  try {
+    const res = await fetch('/api/cad/projects', { cache: 'no-store' });
+    const items = await res.json();
+    const visible = items.filter(it => !it.name.startsWith('_'));
+    if (!visible.length) {
+      list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:18px 0;">No saved projects yet. Type a name above and tap Save!</div>';
+      return;
+    }
+    list.innerHTML = visible.map(it => {
+      const dt = new Date(it.ts).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const esc = it.name.replace(/"/g, '&quot;');
+      return '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:9px 11px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+        '<div><div style="color:#f8fafc;font-weight:600;font-size:13px;">' + it.name + '</div><div style="color:#94a3b8;font-size:11px;">' + it.kb + ' KB • ' + dt + '</div></div>' +
+        '<div style="display:flex;gap:6px;">' +
+          '<button type="button" data-open="' + esc + '" style="background:#38bdf8;color:#061019;border:none;border-radius:7px;padding:5px 10px;font-weight:700;font-size:11px;cursor:pointer;">Open</button>' +
+          '<button type="button" data-del="' + esc + '" style="background:#ef4444;color:#fff;border:none;border-radius:7px;padding:5px 8px;font-weight:700;font-size:11px;cursor:pointer;">✕</button>' +
+        '</div></div>';
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div style="color:#ef4444;font-size:12px;text-align:center;padding:12px;">Error loading project list.</div>';
+  }
+};
+window.openProjectsModal = function() {
+  window.renderProjectsList();
+  document.getElementById('projModal').style.display = 'flex';
+};
+window.saveNamedProject = async function() {
+  const btn = document.getElementById('projSaveBtn');
+  const inp = document.getElementById('projNameInput');
+  const name = (inp.value || '').trim() || ('Project_' + Date.now().toString().slice(-4));
+  btn.textContent = 'Saving...';
+  try {
+    const payload = typeof window._aresSerialize === 'function' ? window._aresSerialize() : [];
+    const res = await fetch('/api/cad/projects/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, data: payload })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    inp.value = '';
+    await window.renderProjectsList();
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  } finally {
+    btn.textContent = 'Save';
+  }
+};
+document.getElementById('topProjBtn').addEventListener('click', window.openProjectsModal);
+document.getElementById('projSaveBtn').addEventListener('click', window.saveNamedProject);
+document.getElementById('projNewBtn').addEventListener('click', function() {
+  if (typeof window.clearScene === 'function') window.clearScene();
+  document.getElementById('projModal').style.display = 'none';
+});
+document.getElementById('projList').addEventListener('click', async function(e) {
+  const openName = e.target.getAttribute('data-open');
+  const delName = e.target.getAttribute('data-del');
+  if (openName) {
+    const res = await fetch('/api/cad/projects/load?name=' + encodeURIComponent(openName), { cache: 'no-store' });
+    const data = await res.json();
+    if (typeof window._aresRestore === 'function') window._aresRestore(data);
+    document.getElementById('projModal').style.display = 'none';
+  } else if (delName) {
+    await fetch('/api/cad/projects/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: delName })
+    });
+    window.renderProjectsList();
+  }
+});
+</script>
