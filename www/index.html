@@ -1957,7 +1957,7 @@ document.getElementById('projList').addEventListener('click', async function(e) 
 
   function mountBtn() {
     const allBtns = Array.from(document.querySelectorAll('button'));
-    const delBtn = allBtns.find(b => b.textContent.trim() === 'Del' || b.classList.contains('danger'));
+    const delBtn = allBtns.find(b => b.classList.contains('danger') && b.textContent.includes('Del')) || allBtns.find(b => b.textContent.includes('Del'));
     if (delBtn && delBtn.parentElement) {
       delBtn.parentElement.appendChild(btn);
     } else {
@@ -2063,7 +2063,7 @@ document.getElementById('projList').addEventListener('click', async function(e) 
       const remoteList = await res.json();
 
       let localStore = {};
-      try { localStore = JSON.parse(localStorage.getItem(DB_KEY) || '{}'); } catch(e) {}
+      try { localStore = JSON.parse(localStorage.getItem(DB_KEY) || '{}'); Object.keys(localStore).forEach(k => { if (/^\d+$/.test(k)) delete localStore[k]; }); } catch(e) {}
       const knownSet = new Set(JSON.parse(localStorage.getItem(KNOWN_KEY) || '[]'));
       const remoteNames = new Set((Array.isArray(remoteList) ? remoteList : []).map(r => r.name));
 
