@@ -1898,7 +1898,10 @@ document.getElementById('projList').addEventListener('click', async function(e) 
 
 
 
-<!-- ARES_IOS_POLISH_V2 -->
+
+
+
+<!-- ARES_IOS_POLISH_V3 -->
 <style>
   html, body {
     margin: 0 !important;
@@ -1917,52 +1920,113 @@ document.getElementById('projList').addEventListener('click', async function(e) 
     padding-bottom: max(env(safe-area-inset-bottom, 16px), 16px) !important;
   }
   #ares-sync-btn {
-    position: fixed;
-    bottom: calc(max(env(safe-area-inset-bottom, 16px), 16px) + 6px);
-    right: 10px;
-    z-index: 30;
-    background: #1a2436; color: #e2e8f0;
-    border: 1px solid #2d3b52; border-radius: 7px;
-    padding: 7px 10px; font: 600 11px -apple-system, BlinkMacSystemFont, sans-serif;
-    display: flex; align-items: center; gap: 5px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.35); cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    width: 100%;
+    height: 100%;
+    min-height: 38px;
+    background: #1a2436;
+    color: #e2e8f0;
+    border: 1px solid #2d3b52;
+    border-radius: 7px;
+    padding: 5px 4px;
+    font: 600 10px -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    cursor: pointer;
+    box-sizing: border-box;
   }
-  #ares-sync-dot { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+  #ares-sync-btn:active { transform: scale(0.95); background: #334155; }
+  .sync-row { display: flex; align-items: center; gap: 4px; }
+  #ares-sync-dot { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; flex-shrink: 0; }
 </style>
-<button id="ares-sync-btn" title="Tap to Sync with S24+ (Long-press to set S24+ IP)">
-  <span id="ares-sync-dot"></span><span id="ares-sync-txt">Offline</span>
-</button>
 <script>
 (function() {
   const DB_KEY = 'ARES_CAD_IOS_PROJECTS';
+  const KNOWN_KEY = 'ARES_CAD_IOS_KNOWN_SERVER';
   const DEL_KEY = 'ARES_CAD_IOS_DELETED';
   const KEY_HOST = 'ares_s24_host_v1';
-  const btn = document.getElementById('ares-sync-btn');
-  const dot = document.getElementById('ares-sync-dot');
-  const txt = document.getElementById('ares-sync-txt');
 
-  // Clear stale array keys from earlier tests
-  localStorage.removeItem('ares_cad_projects_v1');
+  // Build native-matching button and place it directly inside the grid right after Del
+  const btn = document.createElement('button');
+  btn.id = 'ares-sync-btn';
+  btn.type = 'button';
+  btn.title = 'Tap to Sync with S24+ (Long-press to set IP)';
+  btn.innerHTML = '<div class="sync-row"><span id="ares-sync-dot"></span><span id="ares-sync-txt">Sync</span></div><span id="ares-sync-sub" style="font-size:9px;color:#94a3b8;">Offline</span>';
+
+  function mountBtn() {
+    const allBtns = Array.from(document.querySelectorAll('button'));
+    const delBtn = allBtns.find(b => b.textContent.trim() === 'Del' || b.classList.contains('danger'));
+    if (delBtn && delBtn.parentElement) {
+      delBtn.parentElement.appendChild(btn);
+    } else {
+      btn.style.position = 'fixed';
+      btn.style.bottom = '20px';
+      btn.style.right = '10px';
+      btn.style.width = '78px';
+      btn.style.height = '40px';
+      document.body.appendChild(btn);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mountBtn);
+  } else {
+    mountBtn();
+  }
 
   function getHost() {
     return localStorage.getItem(KEY_HOST) || 'http://192.168.10.116:8002';
   }
-  function setStatus(color, label) {
-    dot.style.background = color;
-    txt.textContent = label;
+  function setStatus(color, mainText, subText) {
+    const dot = document.getElementById('ares-sync-dot');
+    const txt = document.getElementById('ares-sync-txt');
+    const sub = document.getElementById('ares-sync-sub');
+    if (dot) dot.style.background = color;
+    if (txt) txt.textContent = mainText;
+    if (sub) sub.textContent = subText;
   }
 
-  // Track local deletions on iPhone so they also delete on S24+ when online
+  // Intercept local Saves and Deletes on iPhone to push immediately to S24+
   const _origFetch = window.fetch.bind(window);
   window.fetch = async function(url, opts) {
     const u = String(url);
-    if (u.startsWith('/api/cad/projects/delete')) {
+    const res = await _origFetch(url, opts);
+    if (u.startsWith('/api/cad/projects/save')) {
+      try {
+        const body = JSON.parse((opts && opts.body) || '{}');
+        if (body.name) {
+          // Remove from deleted list if re-saved
+          let del = JSON.parse(localStorage.getItem(DEL_KEY) || '[]');
+          del = del.filter(n => n !== body.name);
+          localStorage.setItem(DEL_KEY, JSON.stringify(del));
+          // Immediately push to S24+ using its native save endpoint
+          const host = getHost().replace(/\/$/, '');
+          _origFetch(host + '/api/cad/projects/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: body.name, data: body.data || [] })
+          }).then(r => {
+            if (r.ok) {
+              const known = new Set(JSON.parse(localStorage.getItem(KNOWN_KEY) || '[]'));
+              known.add(body.name);
+              localStorage.setItem(KNOWN_KEY, JSON.stringify(Array.from(known)));
+              setTimeout(() => syncNow(false), 300);
+            }
+          }).catch(() => {});
+        }
+      } catch(e) {}
+    } else if (u.startsWith('/api/cad/projects/delete')) {
       try {
         const body = JSON.parse((opts && opts.body) || '{}');
         if (body.name) {
           const del = JSON.parse(localStorage.getItem(DEL_KEY) || '[]');
           if (!del.includes(body.name)) del.push(body.name);
           localStorage.setItem(DEL_KEY, JSON.stringify(del));
+          const known = new Set(JSON.parse(localStorage.getItem(KNOWN_KEY) || '[]'));
+          known.delete(body.name);
+          localStorage.setItem(KNOWN_KEY, JSON.stringify(Array.from(known)));
+
           const host = getHost().replace(/\/$/, '');
           _origFetch(host + '/api/cad/projects/delete', {
             method: 'POST',
@@ -1972,12 +2036,12 @@ document.getElementById('projList').addEventListener('click', async function(e) 
         }
       } catch(e) {}
     }
-    return _origFetch(url, opts);
+    return res;
   };
 
   async function syncNow(manual) {
     const host = getHost().replace(/\/$/, '');
-    if (manual) setStatus('#38bdf8', 'Syncing...');
+    if (manual) setStatus('#38bdf8', 'Syncing', '...');
     try {
       // 1. Push any queued iPhone deletions to S24+
       const delList = JSON.parse(localStorage.getItem(DEL_KEY) || '[]');
@@ -2000,43 +2064,43 @@ document.getElementById('projList').addEventListener('click', async function(e) 
 
       let localStore = {};
       try { localStore = JSON.parse(localStorage.getItem(DB_KEY) || '{}'); } catch(e) {}
-
-      // 3. Upload any brand-new local iPhone projects not yet on S24+
+      const knownSet = new Set(JSON.parse(localStorage.getItem(KNOWN_KEY) || '[]'));
       const remoteNames = new Set((Array.isArray(remoteList) ? remoteList : []).map(r => r.name));
-      const toUpload = [];
-      Object.entries(localStore).forEach(([name, entry]) => {
-        if (!remoteNames.has(name) && entry && Array.isArray(entry.data) && entry.data.length > 0) {
-          toUpload.push({ name, ts: entry.ts || Date.now(), data: entry.data });
+
+      // 3. Any project on iPhone that is NOT on S24+ AND NOT in knownSet is a NEW offline iPhone project -> Upload it!
+      for (const [name, entry] of Object.entries(localStore)) {
+        if (!remoteNames.has(name) && !knownSet.has(name) && entry && Array.isArray(entry.data)) {
+          await _origFetch(host + '/api/cad/projects/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, data: entry.data })
+          }).catch(() => {});
+          remoteNames.add(name);
         }
-      });
-      if (toUpload.length > 0) {
-        await _origFetch(host + '/api/cad/projects', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projects: toUpload })
-        }).catch(() => {});
       }
 
-      // 4. Mirror S24+ projects directly into ARES_CAD_IOS_PROJECTS
+      // 4. Re-fetch final list from S24+ (if any iPhone projects were just uploaded) and mirror to iPhone
+      const finalRes = await _origFetch(host + '/api/cad/projects', { cache: 'no-store' });
+      const finalList = finalRes.ok ? await finalRes.json() : remoteList;
+
       const nextStore = {};
-      (Array.isArray(remoteList) ? remoteList : []).forEach(r => {
+      const nextKnown = [];
+      (Array.isArray(finalList) ? finalList : []).forEach(r => {
         if (!r || !r.name) return;
+        nextKnown.push(r.name);
         nextStore[r.name] = {
           ts: r.ts || Date.now(),
           data: r.data || (localStore[r.name] && localStore[r.name].data) || []
         };
       });
-      toUpload.forEach(u => {
-        nextStore[u.name] = { ts: u.ts, data: u.data };
-      });
 
       localStorage.setItem(DB_KEY, JSON.stringify(nextStore));
+      localStorage.setItem(KNOWN_KEY, JSON.stringify(nextKnown));
       if (typeof window.renderProjectsList === 'function') window.renderProjectsList();
 
-      const count = Object.keys(nextStore).length;
-      setStatus('#22c55e', 'Synced (' + count + ')');
+      setStatus('#22c55e', 'Synced', '(' + nextKnown.length + ')');
     } catch (e) {
-      setStatus('#94a3b8', 'Offline');
+      setStatus('#94a3b8', 'Sync', 'Offline');
     }
   }
 
@@ -2055,6 +2119,6 @@ document.getElementById('projList').addEventListener('click', async function(e) 
 
   window.addEventListener('online', () => syncNow(false));
   setTimeout(() => syncNow(false), 1000);
-  setInterval(() => syncNow(false), 20000);
+  setInterval(() => syncNow(false), 15000);
 })();
 </script>
