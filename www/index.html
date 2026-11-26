@@ -132,6 +132,7 @@ window._aresRestore = (data) => {
   });
   if (parts.length) selectMesh(parts.at(-1));
   syncUI();
+window._aresRefs = () => ({ scene, parts, selected, selectMesh, syncUI, makeCadMat, styleMesh });
 };
 setInterval(() => { try { localStorage.setItem('ares_cad_autosave_v1', JSON.stringify(window._aresSerialize())); } catch (e) {} }, 2500);
 try {
@@ -2126,7 +2127,7 @@ document.getElementById('projList').addEventListener('click', async function(e) 
 <!-- ARES_PRINT_PREP_V2 -->
 <script>
 (function(){
-  const getM=()=>typeof selected!=='undefined'&&selected?selected:(typeof parts!=='undefined'&&parts.length?parts[parts.length-1]:null);
+  const getM=()=>{const r=window._aresRefs&&window._aresRefs();if(r){window.scene=r.scene;window.parts=r.parts;window.selected=r.selected;window.selectMesh=r.selectMesh;window.syncUI=r.syncUI;window.makeCadMat=r.makeCadMat;window.styleMesh=r.styleMesh;return r.selected||(r.parts&&r.parts[r.parts.length-1]);}return null;};
   const bed=m=>{m.updateMatrixWorld(true);const b=new THREE.Box3().setFromObject(m);m.position.y-=b.min.y;m.updateMatrixWorld(true)};
   function evalQ(pos,q){
     const a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3(),cb=new THREE.Vector3(),ab=new THREE.Vector3();
