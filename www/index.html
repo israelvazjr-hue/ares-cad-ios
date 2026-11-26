@@ -1976,7 +1976,7 @@ document.getElementById('projList').addEventListener('click', async function(e) 
   }
 
   function getHost() {
-    return localStorage.getItem(KEY_HOST) || 'http://192.168.10.116:8002';
+    return localStorage.getItem(KEY_HOST) || 'http://192.168.10.117:8002';
   }
   function setStatus(color, mainText, subText) {
     const dot = document.getElementById('ares-sync-dot');
@@ -2120,5 +2120,84 @@ document.getElementById('projList').addEventListener('click', async function(e) 
   window.addEventListener('online', () => syncNow(false));
   setTimeout(() => syncNow(false), 1000);
   setInterval(() => syncNow(false), 15000);
+})();
+</script>
+
+<!-- ARES_PRINT_PREP_V2 -->
+<script>
+(function(){
+  const getM=()=>typeof selected!=='undefined'&&selected?selected:(typeof parts!=='undefined'&&parts.length?parts[parts.length-1]:null);
+  const bed=m=>{m.updateMatrixWorld(true);const b=new THREE.Box3().setFromObject(m);m.position.y-=b.min.y;m.updateMatrixWorld(true)};
+  function evalQ(pos,q){
+    const a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3(),cb=new THREE.Vector3(),ab=new THREE.Vector3();
+    let ov=0,bot=0,minY=1e9;const ts=[];
+    for(let i=0;i<pos.count;i+=3){
+      a.fromBufferAttribute(pos,i).applyQuaternion(q);b.fromBufferAttribute(pos,i+1).applyQuaternion(q);c.fromBufferAttribute(pos,i+2).applyQuaternion(q);
+      cb.subVectors(c,b);ab.subVectors(a,b);cb.cross(ab);const ar=0.5*cb.length();if(ar<1e-6)continue;
+      const ny=cb.y/(2*ar),ty=Math.min(a.y,b.y,c.y);if(ty<minY)minY=ty;ts.push({ny,ar,ty});
+    }
+    for(const t of ts){if(t.ty<=minY+0.3&&t.ny<-0.96)bot+=t.ar;else if(t.ny<-0.64)ov+=t.ar*(Math.abs(t.ny)**1.5);}
+    return ov*4.0-bot*1.5;
+  }
+  window.aresAutoOrientMinSupports=function(){
+    const m=getM();if(!m||!m.geometry)return alert('Select a part first!');
+    const pos=m.geometry.attributes.position;if(!pos)return;
+    const qs=[];
+    for(let x=-1;x<=1;x++)for(let z=-1;z<=1;z++)qs.push(new THREE.Quaternion().setFromEuler(new THREE.Euler(x*Math.PI/2,0,z*Math.PI/2)));
+    for(const a of [Math.PI/4,-Math.PI/4,Math.PI/6,-Math.PI/6]){qs.push(new THREE.Quaternion().setFromEuler(new THREE.Euler(a,0,0)));qs.push(new THREE.Quaternion().setFromEuler(new THREE.Euler(0,0,a)));}
+    let bestQ=qs[0],bestS=1e18;for(const q of qs){const s=evalQ(pos,q);if(s<bestS){bestS=s;bestQ=q;}}
+    m.geometry.applyQuaternion(bestQ);m.geometry.computeVertexNormals();m.rotation.set(0,0,0);bed(m);if(typeof syncUI==='function')syncUI();
+  };
+  function capLoop(segs,y,flip){
+    if(!segs.length)return [];
+    const cx=segs.reduce((s,p)=>s+p[0].x+p[1].x,0)/(segs.length*2),cz=segs.reduce((s,p)=>s+p[0].z+p[1].z,0)/(segs.length*2),out=[];
+    for(const [p1,p2] of segs)flip?out.push(cx,y,cz,p2.x,y,p2.z,p1.x,y,p1.z):out.push(cx,y,cz,p1.x,y,p1.z,p2.x,y,p2.z);
+    return out;
+  }
+  window.aresSplitForEasyPrint=function(){
+    const m=getM();if(!m||!m.geometry)return alert('Select a part first!');
+    m.updateMatrixWorld(true);const g=m.geometry.clone();g.applyMatrix4(m.matrixWorld);
+    const ni=g.index?g.toNonIndexed():g;ni.computeBoundingBox();const bb=ni.boundingBox,h=bb.max.y-bb.min.y;
+    if(h<4)return alert('Part is too thin to split.');
+    const pos=ni.attributes.position,bins=16,bc=new Array(bins).fill(0),a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3(),cb=new THREE.Vector3(),ab=new THREE.Vector3();
+    for(let i=0;i<pos.count;i+=3){
+      a.fromBufferAttribute(pos,i);b.fromBufferAttribute(pos,i+1);c.fromBufferAttribute(pos,i+2);
+      cb.subVectors(c,b);ab.subVectors(a,b);cb.cross(ab);const ar=0.5*cb.length();if(ar<1e-6)continue;
+      if(cb.y/(2*ar)<-0.64)bc[Math.min(bins-1,Math.max(0,Math.floor((((a.y+b.y+c.y)/3-bb.min.y)/h)*bins)))]+=ar;
+    }
+    let bestB=Math.floor(bins/2),maxO=0;for(let i=2;i<bins-2;i++)if(bc[i]>maxO){maxO=bc[i];bestB=i;}
+    const cutY=bb.min.y+((bestB+0.5)/bins)*h,bp=[],tp=[],segs=[];
+    const lerp=(p1,p2)=>{const t=(cutY-p1.y)/(p2.y-p1.y||1e-6);return new THREE.Vector3(p1.x+t*(p2.x-p1.x),cutY,p1.z+t*(p2.z-p1.z))};
+    const tri=(arr,p1,p2,p3)=>arr.push(p1.x,p1.y,p1.z,p2.x,p2.y,p2.z,p3.x,p3.y,p3.z);
+    for(let i=0;i<pos.count;i+=3){
+      const pts=[new THREE.Vector3().fromBufferAttribute(pos,i),new THREE.Vector3().fromBufferAttribute(pos,i+1),new THREE.Vector3().fromBufferAttribute(pos,i+2)];
+      const up=pts.map(p=>p.y>=cutY),cnt=up.filter(Boolean).length;
+      if(cnt===3)tri(tp,pts[0],pts[1],pts[2]);else if(cnt===0)tri(bp,pts[0],pts[1],pts[2]);
+      else if(cnt===1){const ia=up.indexOf(true),pA=pts[ia],pB=pts[(ia+1)%3],pC=pts[(ia+2)%3],ab=lerp(pA,pB),ac=lerp(pA,pC);tri(tp,pA,ab,ac);tri(bp,ab,pB,pC);tri(bp,ab,pC,ac);segs.push([ab,ac]);}
+      else{const ib=up.indexOf(false),pB=pts[ib],pC=pts[(ib+1)%3],pA=pts[(ib+2)%3],ba=lerp(pB,pA),bc=lerp(pB,pC);tri(bp,pB,bc,ba);tri(tp,bc,pC,pA);tri(tp,bc,pA,ba);segs.push([bc,ba]);}
+    }
+    if(!bp.length||!tp.length)return alert('Could not split at that height.');
+    bp.push(...capLoop(segs,cutY,false));tp.push(...capLoop(segs,cutY,true));
+    const gB=new THREE.BufferGeometry();gB.setAttribute('position',new THREE.Float32BufferAttribute(bp,3));gB.computeVertexNormals();
+    const gT=new THREE.BufferGeometry();gT.setAttribute('position',new THREE.Float32BufferAttribute(tp,3));gT.rotateX(Math.PI);gT.computeVertexNormals();
+    const col=(m.material&&m.material.color)?m.material.color.getHex():0x2563eb;
+    const m1=new THREE.Mesh(gB,typeof makeCadMat==='function'?makeCadMat(col):new THREE.MeshStandardMaterial({color:col}));
+    const m2=new THREE.Mesh(gT,typeof makeCadMat==='function'?makeCadMat(0x10b981):new THREE.MeshStandardMaterial({color:0x10b981}));
+    if(typeof styleMesh==='function'){styleMesh(m1);styleMesh(m2);}
+    const nm=(m.userData&&m.userData.name)||'Part';m1.userData={name:nm+'_Bottom',type:'split',params:{}};m2.userData={name:nm+'_Top_Flat',type:'split',params:{}};
+    scene.remove(m);const idx=parts.indexOf(m);if(idx!==-1)parts.splice(idx,1);
+    bed(m1);bed(m2);const b1=new THREE.Box3().setFromObject(m1),b2=new THREE.Box3().setFromObject(m2);
+    m2.position.x=m1.position.x+(b1.max.x-b1.min.x)*0.55+(b2.max.x-b2.min.x)*0.55+10;
+    scene.add(m1,m2);parts.push(m1,m2);if(typeof selectMesh==='function')selectMesh(m2);if(typeof syncUI==='function')syncUI();
+  };
+  function mount(){
+    const tb=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Tools');
+    const host=(tb&&tb.parentElement&&tb.parentElement.nextElementSibling)||document.body;
+    if(!host||document.getElementById('ares-orient-btn'))return;
+    const d=document.createElement('div');d.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;width:100%;';
+    d.innerHTML='<button id="ares-orient-btn" type="button" onclick="window.aresAutoOrientMinSupports()" style="background:linear-gradient(135deg,#0284c7,#0369a1);border-color:#38bdf8;color:#fff;font-weight:700;padding:8px 6px;font-size:11px;">🧭 Best Print Angle</button><button id="ares-split-btn" type="button" onclick="window.aresSplitForEasyPrint()" style="background:linear-gradient(135deg,#059669,#047857);border-color:#34d399;color:#fff;font-weight:700;padding:8px 6px;font-size:11px;">✂️ Split Overhangs</button>';
+    host.appendChild(d);
+  }
+  document.readyState==='loading'?document.addEventListener('DOMContentLoaded',mount):mount();
 })();
 </script>
