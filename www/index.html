@@ -1802,6 +1802,8 @@ window._aresRestore = (data) => {
   if (parts.length) selectMesh(parts.at(-1));
   syncUI();
 };
+
+window._aresRefs = () => ({ scene, parts, selected, selectMesh: typeof selectMesh!=='undefined'?selectMesh:null, syncUI: typeof syncUI!=='undefined'?syncUI:null, makeCadMat: typeof makeCadMat!=='undefined'?makeCadMat:null, styleMesh: typeof styleMesh!=='undefined'?styleMesh:null });
 </script>
 <div id="projModal" style="display:none;position:fixed;inset:0;background:rgba(6,10,18,0.88);z-index:99999;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);">
   <div style="background:#0f172a;border:1px solid #334155;border-radius:14px;width:100%;max-width:420px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
