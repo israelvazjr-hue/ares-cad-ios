@@ -127,8 +127,8 @@ window._aresRestore = (data) => {
     if (typeof computeCreaseNormals === 'function') computeCreaseNormals(geo); else geo.computeVertexNormals();
     const mat = item.isHole ? new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.42 }) : makeCadMat(item.color);
     const m = new THREE.Mesh(geo, mat);
-    styleMesh(m);
     m.userData = { name: item.name, type: item.type, params: item.params || {}, isHole: !!item.isHole, lifted: !!item.lifted };
+    styleMesh(m);
     scene.add(m); parts.push(m);
   });
   if (parts.length) selectMesh(parts.at(-1));
