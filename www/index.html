@@ -124,6 +124,7 @@ window._aresRestore = (data) => {
   data.forEach(item => {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(item.pos, 3));
+    if (typeof computeCreaseNormals === 'function') computeCreaseNormals(geo); else geo.computeVertexNormals();
     const mat = item.isHole ? new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.42 }) : makeCadMat(item.color);
     const m = new THREE.Mesh(geo, mat);
     styleMesh(m);
@@ -1981,7 +1982,7 @@ document.getElementById('projList').addEventListener('click', async function(e) 
   }
 
   function getHost() {
-    return localStorage.getItem(KEY_HOST) || 'http://192.168.10.117:8002';
+    return localStorage.getItem(KEY_HOST) || 'http://192.168.10.136:8002';
   }
   function setStatus(color, mainText, subText) {
     const dot = document.getElementById('ares-sync-dot');
